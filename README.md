@@ -1,5 +1,7 @@
 # Cognitive Filesystem (CFS)
 
+![CFS macOS and iOS Apps](images/cfs.png)
+
 Cognitive Filesystem (CFS) is a **local-first, deterministic semantic storage and retrieval system** written in rust, designed to index personal documents, keep them continuously up to date, and make them searchable across devices with cryptographic verification.
 
 It is a **semantic substrate** intended to be stable, inspectable, and correct before any LLM-based intelligence is layered on top.
