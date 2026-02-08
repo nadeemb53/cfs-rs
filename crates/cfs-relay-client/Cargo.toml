@@ -1,0 +1,18 @@
+[package]
+name = "cfs-relay-client"
+description = "HTTP client for CFS relay server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+cfs-sync = { path = "../cfs-sync" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }

@@ -1,0 +1,31 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data
+/.cfs/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# ONNX models (download separately)
+*.onnx
+
+# Mobile build artifacts
+mobile/ios/build/
+mobile/android/build/
+mobile/android/.gradle/

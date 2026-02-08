@@ -1,0 +1,19 @@
+[package]
+name = "cfs-query"
+description = "RAG query engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+cfs-graph = { path = "../cfs-graph" }
+cfs-embeddings = { path = "../cfs-embeddings" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+hex = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }

@@ -1,0 +1,24 @@
+[package]
+name = "cfs-sync"
+description = "Merkle tree, cognitive diffs, and crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde-big-array = { workspace = true }
+
+# Crypto
+chacha20poly1305 = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+rand = { workspace = true }
+
+# Serialization
+ciborium = { workspace = true }
+zstd = { workspace = true }

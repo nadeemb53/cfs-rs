@@ -1,0 +1,18 @@
+[package]
+name = "cfs-desktop-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+cfs-desktop = { path = "../cfs-desktop" }
+cfs-query = { path = "../cfs-query" }
+cfs-embeddings = { path = "../cfs-embeddings" }
+clap = { version = "4.4", features = ["derive"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+path-clean = "1.0"

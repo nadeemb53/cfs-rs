@@ -1,0 +1,92 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cfs-core",
+    "crates/cfs-parser",
+    "crates/cfs-embeddings",
+    "crates/cfs-graph",
+    "crates/cfs-sync",
+    "crates/cfs-relay-client",
+    "crates/cfs-query",
+    "crates/cfs-desktop",
+    "crates/cfs-mobile",
+    "crates/cfs-tests",
+    "crates/cfs-desktop-cli",
+    "apps/macos/src-tauri",
+    "relay/cfs-relay-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["CFS Contributors"]
+repository = "https://github.com/nadeemb53/csf-rs"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-big-array = "0.5"
+ciborium = "0.2"
+
+# Storage
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+
+# Crypto
+chacha20poly1305 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+blake3 = "1.5"
+rand = "0.8"
+
+# Compression
+zstd = "0.13"
+
+# IDs and hashing
+uuid = { version = "1.11", features = ["v4", "v5", "serde"] }
+half = { version = "2.4", features = ["serde"] }
+base64 = "0.21"
+hex = "0.4"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+ureq = "3.0"
+axum = "0.7"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# File watching
+notify = "7.0"
+
+# ML/Embeddings
+candle-core = { version = "0.8.2", default-features = false }
+candle-nn = { version = "0.8.2", default-features = false }
+candle-transformers = { version = "0.8.2", default-features = false }
+tokenizers = "0.20"
+ndarray = "0.16"
+
+# Vector search (pure Rust HNSW)
+hnsw_rs = "0.3"
+
+# PDF parsing
+pdf-extract = "0.7"
+
+# Markdown parsing
+pulldown-cmark = "0.12"
+
+# Desktop
+tauri = { version = "2.2", features = [] }
+tauri-build = "2.0"
+
+# Testing
+tempfile = "3.14"

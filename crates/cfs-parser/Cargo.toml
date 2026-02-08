@@ -1,0 +1,19 @@
+[package]
+name = "cfs-parser"
+description = "Document parsing for PDF, Markdown, and text files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+# Parsing
+pdf-extract = { workspace = true }
+pulldown-cmark = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

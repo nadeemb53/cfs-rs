@@ -1,0 +1,31 @@
+[package]
+name = "cfs-desktop"
+description = "Tauri desktop application for CFS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Desktop app is a binary, not compiled with workspace by default
+# Will be set up with Tauri in a later phase
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+cfs-parser = { path = "../cfs-parser" }
+rand = "0.8"
+blake3 = "1.5"
+cfs-embeddings = { path = "../cfs-embeddings" }
+cfs-graph = { path = "../cfs-graph" }
+cfs-sync = { path = "../cfs-sync" }
+cfs-relay-client = { path = "../cfs-relay-client" }
+cfs-query = { path = "../cfs-query" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+notify = "6.1.1"
+mime_guess = "2.0.4"
+uuid = { workspace = true }
+dirs = "5.0.1"
+hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

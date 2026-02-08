@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CFS macOS (V0)</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            padding: 20px;
+            color: #333;
+        }
+
+        .card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+
+        .stats {
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        input[type="text"] {
+            width: 300px;
+            padding: 5px;
+        }
+
+        button {
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+
+        .result {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+        }
+
+        .score {
+            color: #666;
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>CFS macOS Runner</h1>
+
+    <div class="card">
+        <h3>1. Workspace</h3>
+        <button onclick="pickFolder()">Select Folder to Watch</button>
+        <p id="watchPath">None</p>
+    </div>
+
+    <div class="card">
+        <h3>2. System Status</h3>
+        <div class="stats">
+            State Root: <span id="stateRoot">...</span><br>
+            Documents: <span id="docCount">0</span><br>
+            Chunks: <span id="chunkCount">0</span>
+        </div>
+        <br>
+        <button onclick="refreshStats()">Refresh Status</button>
+        <button onclick="syncNow()">Sync to Relay</button>
+    </div>
+
+    <div class="card">
+        <h3>3. Hybrid Search</h3>
+        <input type="text" id="queryInput" placeholder="Enter semantic or keyword query...">
+        <button onclick="runQuery()">Search</button>
+        <div id="results"></div>
+    </div>
+
+    <div class="card">
+        <h3>4. Document Browser</h3>
+        <button onclick="loadDocuments()">Load All Documents</button>
+        <div id="documentList" style="margin-top: 10px;"></div>
+        <div id="chunkViewer" style="margin-top: 20px; border-top: 2px solid #ddd; display: none;">
+            <h4>Chunks for: <span id="currentDocPath"></span></h4>
+            <div id="chunkResults"></div>
+        </div>
+    </div>
+
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+        const { open: tauriOpen } = window.__TAURI__.dialog;
+
+        async function pickFolder() {
+            const selected = await tauriOpen({ directory: true, multiple: false });
+            if (selected) {
+                document.getElementById('watchPath').innerText = selected;
+                const res = await invoke('add_watch_dir', { path: selected });
+                console.log(res);
+                refreshStats();
+            }
+        }
+
+        async function refreshStats() {
+            const stats = await invoke('get_stats');
+            document.getElementById('stateRoot').innerText = stats.state_root;
+            document.getElementById('docCount').innerText = stats.doc_count;
+            document.getElementById('chunkCount').innerText = stats.chunk_count;
+        }
+
+        async function syncNow() {
+            const res = await invoke('trigger_sync');
+            alert(res);
+        }
+
+        async function runQuery() {
+            const btn = event.target;
+            const input = document.getElementById('queryInput');
+            const text = input.value;
+            if (!text) return;
+
+            const container = document.getElementById('results');
+            container.innerHTML = '<em>Searching...</em>';
+            btn.disabled = true;
+
+            try {
+                const results = await invoke('perform_query', { text });
+                container.innerHTML = '';
+
+                if (results.length === 0) {
+                    container.innerHTML = '<p>No results found.</p>';
+                }
+
+                results.forEach(r => {
+                    const div = document.createElement('div');
+                    div.className = 'result';
+                    div.innerHTML = `
+                        <div class="score">RRF Score: ${r.score.toFixed(4)} | ${r.path}</div>
+                        <div>${r.text}</div>
+                    `;
+                    container.appendChild(div);
+                });
+            } catch (e) {
+                container.innerHTML = `<p style="color: red;">Error: ${e}</p>`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function loadDocuments() {
+            const btn = event.target;
+            const container = document.getElementById('documentList');
+            container.innerHTML = '<em>Loading...</em>';
+            btn.disabled = true;
+            
+            try {
+                const docs = await invoke('list_documents');
+                container.innerHTML = '';
+
+                docs.forEach(doc => {
+                    const div = document.createElement('div');
+                    div.style = 'margin-bottom: 5px; padding: 5px; background: #f9f9f9; border-radius: 4px; cursor: pointer;';
+                    div.onclick = () => showChunks(doc.id, doc.path);
+                    div.innerHTML = `<strong>${doc.path.split('/').pop()}</strong> <span style="font-size: 0.8em; color: #666;">(${doc.id.substring(0, 8)}...)</span>`;
+                    container.appendChild(div);
+                });
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function showChunks(docId, docPath) {
+            document.getElementById('chunkViewer').style.display = 'block';
+            document.getElementById('currentDocPath').innerText = docPath;
+            const container = document.getElementById('chunkResults');
+            container.innerHTML = '<em>Loading...</em>';
+
+            try {
+                const chunks = await invoke('get_document_chunks', { docId });
+                container.innerHTML = '';
+
+                chunks.forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'result';
+                    div.innerHTML = `
+                        <div class="score">Chunk Content</div>
+                        <div>${c.text}</div>
+                    `;
+                    container.appendChild(div);
+                });
+            } catch (e) {
+                container.innerHTML = `<p style="color: red;">Error: ${e}</p>`;
+            }
+        }
+
+        // Auto refresh stats
+        setInterval(refreshStats, 5000);
+        // Initial load
+        refreshStats();
+    </script>
+</body>
+
+</html>

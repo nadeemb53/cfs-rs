@@ -1,0 +1,17 @@
+[package]
+name = "cfs-core"
+description = "Core data models and traits for the Cognitive Filesystem"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde-big-array = { workspace = true }
+uuid = { workspace = true }
+half = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

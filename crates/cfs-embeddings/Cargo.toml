@@ -1,0 +1,24 @@
+[package]
+name = "cfs-embeddings"
+description = "Local embedding generation using ONNX Runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cfs-core = { path = "../cfs-core" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# ML
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+tokenizers = { workspace = true }
+ndarray = { workspace = true }
+
+# Model download and hashing
+serde_json = { workspace = true }
+ureq = { workspace = true }
+blake3 = { workspace = true }
+dirs = "5.0"
