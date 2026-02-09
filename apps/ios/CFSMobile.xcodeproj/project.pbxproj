@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		5BB49DBE2F38ED79005FB325 /* CFSMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CFSMobile.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5BB49DBE2F38ED79005FB325 /* CFSMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CFSMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5BB49DC02F38ED79005FB325 /* CFSMobile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "CFSMobile";
+			path = CFSMobile;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -63,10 +63,10 @@
 			fileSystemSynchronizedGroups = (
 				5BB49DC02F38ED79005FB325 /* CFSMobile */,
 			);
-			name = "CFSMobile";
+			name = CFSMobile;
 			packageProductDependencies = (
 			);
-			productName = "CFSMobile";
+			productName = CFSMobile;
 			productReference = 5BB49DBE2F38ED79005FB325 /* CFSMobile.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -269,7 +269,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				"OTHER_LDFLAGS[arch=*]" = "-lc++";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.nadeem.CFSMobile";
+				PRODUCT_BUNDLE_IDENTIFIER = com.nadeem.CFSMobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -306,7 +306,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				"OTHER_LDFLAGS[arch=*]" = "-lc++";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.nadeem.CFSMobile";
+				PRODUCT_BUNDLE_IDENTIFIER = com.nadeem.CFSMobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

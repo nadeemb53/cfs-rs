@@ -35,6 +35,18 @@ class CfsBridge {
         defer { cfs_free_string(cStr) }
         return String(cString: cStr)
     }
+    
+    func getLastError() -> String {
+        guard let cStr = cfs_last_error() else { return "Unknown error" }
+        defer { cfs_free_string(cStr) }
+        return String(cString: cStr)
+    }
+    func getStats() -> String {
+        guard let context = context else { return "{}" }
+        guard let cStr = cfs_stats(context) else { return "{}" }
+        defer { cfs_free_string(cStr) }
+        return String(cString: cStr)
+    }
 }
 
 struct SearchResult: Codable, Identifiable {
@@ -57,6 +69,12 @@ func cfs_query(_ ctx: OpaquePointer, _ query: UnsafePointer<Int8>) -> UnsafeMuta
 
 @_silgen_name("cfs_get_state_root")
 func cfs_get_state_root(_ ctx: OpaquePointer) -> UnsafeMutablePointer<Int8>?
+
+@_silgen_name("cfs_stats")
+func cfs_stats(_ ctx: OpaquePointer) -> UnsafeMutablePointer<Int8>?
+
+@_silgen_name("cfs_last_error")
+func cfs_last_error() -> UnsafeMutablePointer<Int8>?
 
 @_silgen_name("cfs_free_string")
 func cfs_free_string(_ s: UnsafeMutablePointer<Int8>)

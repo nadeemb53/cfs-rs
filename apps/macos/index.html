@@ -84,15 +84,17 @@
             Chunks: <span id="chunkCount">0</span>
         </div>
         <br>
-        <button onclick="refreshStats()">Refresh Status</button>
-        <button onclick="syncNow()">Sync to Relay</button>
+        <button type="button" onclick="refreshStats()">Refresh Status</button>
+        <button type="button" onclick="syncNow()">Push Sync</button>
+        <button type="button" onclick="pullSyncAction()">Pull Sync</button>
     </div>
 
     <div class="card">
         <h3>3. Hybrid Search</h3>
-        <input type="text" id="queryInput" placeholder="Enter semantic or keyword query...">
-        <button onclick="runQuery(event)">Search</button>
-        <button onclick="generateAI(event)">Research with AI</button>
+        <input type="text" id="queryInput" placeholder="Enter semantic or keyword query..."
+            onkeydown="if(event.key==='Enter') runQuery(event)">
+        <button type="button" onclick="runQuery(event)">Search</button>
+        <button type="button" onclick="generateAI(event)">Research with AI</button>
         <div id="results"></div>
 
         <div id="aiSection" style="display: none; margin-top: 20px;">
@@ -109,7 +111,7 @@
 
     <div class="card">
         <h3>4. Document Browser</h3>
-        <button onclick="loadDocuments()">Load All Documents</button>
+        <button type="button" onclick="loadDocuments(event)">Load All Documents</button>
         <div id="documentList" style="margin-top: 10px;"></div>
         <div id="chunkViewer" style="margin-top: 20px; border-top: 2px solid #ddd; display: none;">
             <h4>Chunks for: <span id="currentDocPath"></span></h4>
@@ -143,17 +145,34 @@
             alert(res);
         }
 
+        async function pullSyncAction() {
+            try {
+                const res = await invoke('pull_sync');
+                alert(res);
+                refreshStats();
+            } catch (e) {
+                alert("Pull failed: " + e);
+            }
+        }
+
         async function runQuery(event) {
+            if (event) event.preventDefault();
             console.log("runQuery triggered");
-            const btn = event ? event.target : null;
+            const btn = event && event.target && event.target.tagName === 'BUTTON' ? event.target : null;
             const input = document.getElementById('queryInput');
             const text = input.value;
             if (!text) return;
 
             const container = document.getElementById('results');
             const aiSection = document.getElementById('aiSection');
+            const aiResponse = document.getElementById('aiResponse');
+
             container.innerHTML = '<em>Searching...</em>';
-            aiSection.style.display = 'none'; // Hide AI section when doing normal search
+
+            // Only hide AI section if it's currently showing a loading state or nothing useful
+            if (aiResponse.innerText.includes('Consulting local LLM...') || aiResponse.innerText === '') {
+                aiSection.style.display = 'none';
+            }
             if (btn) btn.disabled = true;
 
             try {
@@ -183,6 +202,7 @@
         }
 
         async function generateAI(event) {
+            if (event) event.preventDefault();
             console.log("generateAI triggered");
             const btn = event ? event.target : null;
             const input = document.getElementById('queryInput');
@@ -217,8 +237,9 @@
             }
         }
 
-        async function loadDocuments() {
-            const btn = event.target;
+        async function loadDocuments(event) {
+            if (event) event.preventDefault();
+            const btn = event ? event.target : null;
             const container = document.getElementById('documentList');
             container.innerHTML = '<em>Loading...</em>';
             btn.disabled = true;

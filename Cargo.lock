@@ -3184,6 +3184,8 @@ dependencies = [
  "cfs-desktop",
  "cfs-embeddings",
  "cfs-query",
+ "cfs-relay-client",
+ "cfs-sync",
  "hex",
  "path-clean",
  "serde",

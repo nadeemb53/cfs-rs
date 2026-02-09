@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var relayUrl = "http://127.0.0.1:8080"
     @State private var queryText = ""
     @State private var stateRoot = "None"
     @State private var results: [SearchResult] = []
     @State private var syncStatus = "Ready"
+    @State private var stats = "Docs: 0, Chunks: 0"
     @State private var isSearching = false
     
     // In V0, we use a single instance of the bridge
@@ -32,20 +34,34 @@ struct ContentView: View {
                         .padding(8)
                         .background(Color.secondary.opacity(0.1))
                         .cornerRadius(4)
+                    
+                    Text(stats)
+                        .font(.caption2)
+                        .foregroundColor(.blue)
                 }
                 
                 HStack {
-                    Button(action: pullSync) {
-                        Label("Pull Sync", systemImage: "arrow.down.circle")
+                    VStack(alignment: .leading) {
+                        Text("Relay URL")
+                            .font(.caption)
+                        TextField("http://...", text: $relayUrl)
+                            .textFieldStyle(.roundedBorder)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.none)
+                    }
+                    
+                    Button(action: {
+                        pullSync()
+                    }) {
+                        Label("Pull", systemImage: "arrow.down.circle")
                     }
                     .buttonStyle(.borderedProminent)
-                    
-                    Spacer()
-                    
-                    Text(syncStatus)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
                 }
+                
+                Text(syncStatus)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
                 
                 Divider()
                 
@@ -89,8 +105,7 @@ struct ContentView: View {
     
     func pullSync() {
         syncStatus = "Syncing..."
-        let relayUrl = "http://localhost:3000" // Hardcoded for V0
-        let keyHex = "0000000000000000000000000000000000000000000000000000000000000001"
+        let keyHex = "0101010101010101010101010101010101010101010101010101010101010101"
         
         DispatchQueue.global(qos: .userInitiated).async {
             let diffs = bridge.sync(relayUrl: relayUrl, keyHex: keyHex)
@@ -98,8 +113,13 @@ struct ContentView: View {
                 if diffs >= 0 {
                     syncStatus = "Applied \(diffs) diffs"
                     stateRoot = bridge.getStateRoot()
+                    updateStats()
                 } else {
-                    syncStatus = "Error: \(diffs)"
+                    let detail = bridge.getLastError()
+                    syncStatus = "Error: \(detail)"
+                    if detail.contains("connection refused") || detail.contains("localhost") {
+                        syncStatus += " (Tip: Use Mac's IP if on real device)"
+                    }
                 }
             }
         }
@@ -107,16 +127,37 @@ struct ContentView: View {
     
     func runQuery() {
         guard !queryText.isEmpty else { return }
+        syncStatus = "Searching..."
         isSearching = true
         
         // Run on background thread
         Task {
             let searchResults = bridge.query(text: queryText)
+            let error = bridge.getLastError()
             
             await MainActor.run {
                 self.results = searchResults
                 self.isSearching = false
+                if searchResults.isEmpty && !error.isEmpty && !error.contains("Mutex") {
+                    syncStatus = "Search Error: \(error)"
+                } else if searchResults.isEmpty {
+                    syncStatus = "No results found"
+                } else {
+                    syncStatus = "Found \(searchResults.count) results"
+                }
             }
+        }
+    }
+
+    func updateStats() {
+        let json = bridge.getStats()
+        // Simple parse for V0
+        if let data = json.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Int] {
+            let docs = dict["documents"] ?? 0
+            let chunks = dict["chunks"] ?? 0
+            let embs = dict["embeddings"] ?? 0
+            stats = "Documents: \(docs), Chunks: \(chunks), Embeddings: \(embs)"
         }
     }
 }

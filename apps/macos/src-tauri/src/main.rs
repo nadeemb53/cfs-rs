@@ -118,7 +118,61 @@ async fn generate_answer(state: State<'_, AppState>, text: String) -> Result<cfs
 #[tauri::command]
 async fn trigger_sync(_state: State<'_, AppState>) -> Result<String> {
     // In V0, sync happens in background. Here we just confirm.
-    Ok("Sync is active in background".into())
+    Ok("Sync (Push) is active in background".into())
+}
+
+#[tauri::command]
+async fn pull_sync(state: State<'_, AppState>) -> Result<String> {
+    let qe = {
+        let app_lock = state.app.lock().unwrap();
+        if let Some(app) = app_lock.as_ref() {
+            let graph = app.graph();
+            let embedder = Arc::new(EmbeddingEngine::new()?);
+            cfs_query::QueryEngine::new(graph, embedder)
+        } else {
+            return Err(cfs_core::CfsError::NotFound("App not initialized".into()));
+        }
+    };
+    
+    // In Desktop, we use a single key for now
+    let key_bytes = [1u8; 32];
+    let crypto = cfs_sync::CryptoEngine::new_with_seed(key_bytes);
+    let client = cfs_relay_client::RelayClient::new("http://localhost:8080", "dummy_token");
+    
+    // We need to implement a pull helper in DesktopApp or use RelayClient directly.
+    // For MVP, we'll do 1:1 with mobile's pull logic but adapted for DesktopApp components.
+    
+    let graph_arc = qe.graph();
+    
+    // Fetch roots
+    let remote_roots = client.get_roots(None).await?;
+    let mut applied_count = 0;
+    
+    // Get local head
+    let local_head = {
+        let graph = graph_arc.lock().unwrap();
+        graph.get_latest_root()?.map(|r| r.hash)
+    };
+    
+    // Simplified: pull everything since we don't have a full sync history in local graph for all roots yet
+    // (Actually apply_diff is idempotent, so we can just fetch and apply)
+    for root_hex in remote_roots {
+        let root_bytes = hex::decode(&root_hex).map_err(|e| cfs_core::CfsError::Parse(e.to_string()))?;
+        if Some(root_bytes.as_slice().try_into().unwrap()) == local_head {
+            continue; // Skip if we have it (simplified)
+        }
+        
+        let payload = client.get_diff(&root_hex).await?;
+        let diff = crypto.decrypt_diff(&payload)?;
+        
+        {
+            let mut graph = graph_arc.lock().unwrap();
+            graph.apply_diff(&diff)?;
+        }
+        applied_count += 1;
+    }
+
+    Ok(format!("Pulled {} new diffs from relay", applied_count))
 }
 
 #[tauri::command]
@@ -173,6 +227,7 @@ fn main() {
             perform_query,
             generate_answer,
             trigger_sync,
+            pull_sync,
             list_documents,
             get_document_chunks
         ])

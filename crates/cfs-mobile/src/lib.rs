@@ -10,10 +10,22 @@ use cfs_relay_client::RelayClient;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::runtime::Runtime;
 use tracing::error;
 use uuid::Uuid;
+
+static LAST_ERROR: OnceLock<Mutex<String>> = OnceLock::new();
+
+fn get_last_error_mutex() -> &'static Mutex<String> {
+    LAST_ERROR.get_or_init(|| Mutex::new(String::new()))
+}
+
+fn set_last_error(msg: &str) {
+    if let Ok(mut e) = get_last_error_mutex().lock() {
+        *e = msg.to_string();
+    }
+}
 
 /// Opaque context for mobile operations
 pub struct CfsContext {
@@ -168,21 +180,68 @@ pub unsafe extern "C" fn cfs_sync(
         }
 
         println!("[CFS-Mobile] Syncing {} new roots...", remote_hashes.len() - start_index);
-        
+        // 2. Fetch and apply diffs
         let mut applied_count = 0;
-
         for root_hash in remote_hashes.iter().skip(start_index) {
-            // 4. Fetch encrypted diff
             let root_hex = hex::encode(root_hash);
-            let payload = client.get_diff(&root_hex).await?;
+            // Check if we already have this root
+            let root_bytes = match hex::decode(&root_hex) {
+                Ok(b) => b,
+                Err(e) => {
+                    set_last_error(&format!("Invalid root hash: {}", e));
+                    return Err(CfsError::Sync(format!("Invalid root hash: {}", e)));
+                }
+            };
             
-            // 5. Decrypt
-            let diff = crypto.decrypt_diff(&payload)?;
+            let local_has_root = {
+                let graph = ctx.graph.lock().unwrap();
+                // Query state_roots for exact hash
+                graph.get_latest_root().map(|r| r.is_some() && r.unwrap().hash == root_bytes.as_slice()).unwrap_or(false)
+            };
+
+            if local_has_root {
+                continue;
+            }
+
+            let payload = match client.get_diff(&root_hex).await {
+                Ok(p) => p,
+                Err(e) => {
+                    set_last_error(&format!("Failed to fetch diff {}: {}", root_hex, e));
+                    return Err(CfsError::Sync(format!("Failed to fetch diff {}: {}", root_hex, e)));
+                }
+            };
+
+            let diff = match crypto.decrypt_diff(&payload) {
+                Ok(d) => d,
+                Err(e) => {
+                    set_last_error(&format!("Failed to decrypt diff: {}", e));
+                    return Err(CfsError::Crypto(format!("Failed to decrypt diff: {}", e)));
+                }
+            };
+
+            // Before applying, verify semantic new_root in diff
+            // Actually, we trust the Signed StateRoot for now in V0.
             
-            // 6. Apply
             {
                 let mut graph = ctx.graph.lock().unwrap();
-                graph.apply_diff(&diff)?;
+                if let Err(e) = graph.apply_diff(&diff) {
+                    set_last_error(&format!("Failed to apply diff: {}", e));
+                    return Err(CfsError::Database(format!("Failed to apply diff: {}", e)));
+                }
+                
+                // Also store the StateRoot we just applied
+                let state_root = cfs_core::StateRoot {
+                    hash: diff.metadata.new_root,
+                    parent: if diff.metadata.prev_root == [0u8; 32] { None } else { Some(diff.metadata.prev_root) },
+                    timestamp: diff.metadata.timestamp,
+                    device_id: diff.metadata.device_id,
+                    signature: payload.signature,
+                    seq: diff.metadata.seq,
+                };
+                if let Err(e) = graph.set_latest_root(&state_root) {
+                    set_last_error(&format!("Failed to set latest root: {}", e));
+                    return Err(CfsError::Database(format!("Failed to set latest root: {}", e)));
+                }
             }
             applied_count += 1;
         }
@@ -194,9 +253,14 @@ pub unsafe extern "C" fn cfs_sync(
         Ok(count) => count,
         Err(e) => {
             println!("[CFS-Mobile] Sync Error: {}", e);
+            let error_msg = e.to_string();
+            set_last_error(&error_msg);
             error!("Sync failed: {}", e);
-            match e {
-                CfsError::Sync(_) => -5,                    // Network/Relay error
+            match &e {
+                CfsError::Sync(msg) => {
+                    println!("[CFS-Mobile] Sync Detail: {}", msg);
+                    -5
+                }
                 CfsError::Crypto(_) => -6,                  // Decryption/Keys error
                 CfsError::Database(_) | CfsError::Io(_) => -7, // Database/File error
                 CfsError::InvalidState(_) => -8,            // Sync mismatch / State error
@@ -261,6 +325,7 @@ pub unsafe extern "C" fn cfs_query(
         },
         Err(e) => {
             error!("Query failed: {}", e);
+            set_last_error(&format!("Query failed: {}", e));
             let c_str = CString::new("[]").unwrap_or_default();
             c_str.into_raw()
         }
@@ -380,6 +445,56 @@ pub unsafe extern "C" fn cfs_free_string(s: *mut c_char) {
 pub unsafe extern "C" fn cfs_free(ctx: *mut CfsContext) {
     if !ctx.is_null() {
         drop(Box::from_raw(ctx));
+    }
+}
+
+/// Get the last error message
+///
+/// Returns a string that must be freed with `cfs_free_string`.
+#[no_mangle]
+pub unsafe extern "C" fn cfs_last_error() -> *mut c_char {
+    let msg = if let Ok(e) = get_last_error_mutex().lock() {
+        e.clone()
+    } else {
+        "Mutex poisoned".to_string()
+    };
+    let c_str = CString::new(msg).unwrap_or_default();
+    c_str.into_raw()
+}
+
+/// Get graph statistics
+///
+/// Returns a JSON string that must be freed with `cfs_free_string`.
+///
+/// # Safety
+/// `ctx` must be a valid pointer from `cfs_init`.
+#[no_mangle]
+pub unsafe extern "C" fn cfs_stats(ctx: *mut CfsContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+
+    let ctx = &*ctx;
+    let res = {
+        let graph = ctx.graph.lock().unwrap();
+        graph.stats()
+    };
+
+    match res {
+        Ok(stats) => {
+            let json = serde_json::json!({
+                "documents": stats.documents,
+                "chunks": stats.chunks,
+                "embeddings": stats.embeddings,
+                "edges": stats.edges,
+            }).to_string();
+            let c_str = CString::new(json).unwrap_or_default();
+            c_str.into_raw()
+        }
+        Err(e) => {
+            error!("Failed to get stats: {}", e);
+            ptr::null_mut()
+        }
     }
 }
 

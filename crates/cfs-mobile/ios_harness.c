@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     printf("Library Version: %s\n", cfs_version());
 
     const char* db_path = "./mobile_graph.db";
-    const char* relay_url = "http://localhost:3000";
+    const char* relay_url = "http://localhost:8080";
     const char* key_hex = "0000000000000000000000000000000000000000000000000000000000000001";
 
     // 1. Initialize
