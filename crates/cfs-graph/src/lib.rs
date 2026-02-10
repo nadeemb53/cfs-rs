@@ -676,32 +676,75 @@ impl GraphStore {
     // ========== State ==========
 
     /// Compute Merkle root of the current state
+    /// 
+    /// This is strictly semantic and content-addressable. It does NOT include
+    /// timestamps, UUIDs (except as IDs for relationships), or device-specific metadata.
     pub fn compute_merkle_root(&self) -> Result<[u8; 32]> {
-        // Collect all content hashes
         let mut hasher = blake3::Hasher::new();
 
-        // Hash all documents (sorted by ID for determinism)
+        // 1. Documents (sorted by ID)
         let mut docs = self.get_all_documents()?;
         docs.sort_by_key(|d| d.id);
-        
         for doc in docs {
             hasher.update(doc.id.as_bytes());
             hasher.update(&doc.hash);
+            // We ignore mtime/path as they are metadata, but hash is semantic content.
         }
 
-        // Get chunks count
-        let chunk_count: i64 = self
-            .db
-            .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
+        // 2. Chunks (sorted by ID)
+        // We use a query to get them sorted to avoid huge Vec in memory if possible, 
+        // but for MVP we get all and sort.
+        let mut stmt = self.db.prepare("SELECT id, text_hash FROM chunks ORDER BY id")
             .map_err(|e| CfsError::Database(e.to_string()))?;
-        hasher.update(&chunk_count.to_le_bytes());
+        let chunk_iter = stmt.query_map([], |row| {
+            let id_bytes: Vec<u8> = row.get(0)?;
+            let hash_bytes: Vec<u8> = row.get(1)?;
+            Ok((id_bytes, hash_bytes))
+        }).map_err(|e| CfsError::Database(e.to_string()))?;
 
-        // Get embeddings count
-        let emb_count: i64 = self
-            .db
-            .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))
+        for chunk in chunk_iter {
+            let (id, hash) = chunk.map_err(|e| CfsError::Database(e.to_string()))?;
+            hasher.update(&id);
+            hasher.update(&hash);
+        }
+
+        // 3. Embeddings (sorted by ID)
+        let mut stmt = self.db.prepare("SELECT id, vector, model_hash FROM embeddings ORDER BY id")
             .map_err(|e| CfsError::Database(e.to_string()))?;
-        hasher.update(&emb_count.to_le_bytes());
+        let emb_iter = stmt.query_map([], |row| {
+            let id_bytes: Vec<u8> = row.get(0)?;
+            let vec_bytes: Vec<u8> = row.get(1)?;
+            let model_hash: Vec<u8> = row.get(2)?;
+            Ok((id_bytes, vec_bytes, model_hash))
+        }).map_err(|e| CfsError::Database(e.to_string()))?;
+
+        for emb in emb_iter {
+            let (id, vec, model) = emb.map_err(|e| CfsError::Database(e.to_string()))?;
+            hasher.update(&id);
+            hasher.update(&vec);
+            hasher.update(&model);
+        }
+
+        // 4. Edges (sorted by source, target, kind)
+        let mut stmt = self.db.prepare("SELECT source, target, kind, weight FROM edges ORDER BY source, target, kind")
+            .map_err(|e| CfsError::Database(e.to_string()))?;
+        let edge_iter = stmt.query_map([], |row| {
+            let s: Vec<u8> = row.get(0)?;
+            let t: Vec<u8> = row.get(1)?;
+            let k: i32 = row.get(2)?;
+            let w: Option<i32> = row.get(3)?;
+            Ok((s, t, k, w))
+        }).map_err(|e| CfsError::Database(e.to_string()))?;
+
+        for edge in edge_iter {
+            let (s, t, k, w) = edge.map_err(|e| CfsError::Database(e.to_string()))?;
+            hasher.update(&s);
+            hasher.update(&t);
+            hasher.update(&k.to_le_bytes());
+            if let Some(weight) = w {
+                hasher.update(&weight.to_le_bytes());
+            }
+        }
 
         Ok(*hasher.finalize().as_bytes())
     }

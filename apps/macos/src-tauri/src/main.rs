@@ -18,6 +18,7 @@ struct Stats {
     state_root: String,
     doc_count: usize,
     chunk_count: usize,
+    status: String,
 }
 
 #[derive(Serialize)]
@@ -70,12 +71,14 @@ async fn get_stats(state: State<'_, AppState>) -> Result<Stats> {
             state_root: root,
             doc_count: stats.documents,
             chunk_count: stats.chunks,
+            status: app.status(),
         })
     } else {
         Ok(Stats {
             state_root: "Not Initialized".into(),
             doc_count: 0,
             chunk_count: 0,
+            status: "Offline".into(),
         })
     }
 }
@@ -100,9 +103,43 @@ async fn perform_query(state: State<'_, AppState>, text: String) -> Result<Vec<U
 }
 
 #[tauri::command]
+async fn generate_answer(state: State<'_, AppState>, text: String) -> Result<cfs_query::GenerationResult> {
+    let qe = {
+        let app_lock = state.app.lock().unwrap();
+        if let Some(app) = app_lock.as_ref() {
+            let graph = app.graph();
+            let embedder = Arc::new(EmbeddingEngine::new()?);
+            // Use Ollama as the generator for desktop
+            let generator = Box::new(cfs_query::OllamaGenerator::new(
+                "http://localhost:11434".into(),
+                "mistral".into(),
+            ));
+            QueryEngine::new(graph, embedder).with_generator(generator)
+        } else {
+            return Err(cfs_core::CfsError::NotFound("App not initialized".into()));
+        }
+    }; // app_lock is dropped here
+
+    qe.generate_answer(&text).await
+}
+
+#[tauri::command]
 async fn trigger_sync(_state: State<'_, AppState>) -> Result<String> {
     // In V0, sync happens in background. Here we just confirm.
-    Ok("Sync is active in background".into())
+    Ok("Sync (Push) is active in background".into())
+}
+
+#[tauri::command]
+async fn reset_data(state: State<'_, AppState>) -> Result<String> {
+    let mut app_lock = state.app.lock().unwrap();
+    *app_lock = None;
+    
+    // Delete data dir
+    if state.data_dir.exists() {
+        std::fs::remove_dir_all(&state.data_dir).map_err(|e| cfs_core::CfsError::Io(e))?;
+    }
+    
+    Ok("Data directory deleted. App reset.".into())
 }
 
 #[tauri::command]
@@ -155,7 +192,9 @@ fn main() {
             add_watch_dir,
             get_stats,
             perform_query,
+            generate_answer,
             trigger_sync,
+            reset_data,
             list_documents,
             get_document_chunks
         ])

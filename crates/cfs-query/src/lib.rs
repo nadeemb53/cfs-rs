@@ -4,12 +4,13 @@
 
 use cfs_core::{Chunk, CfsError, Result};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 use uuid::Uuid;
 use std::collections::HashMap;
 
 /// Search result with relevance score
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchResult {
     /// The matching chunk
     pub chunk: Chunk,
@@ -19,12 +20,74 @@ pub struct SearchResult {
     pub doc_path: PathBuf,
 }
 
-use std::sync::{Arc, Mutex};
+/// Result of an LLM generation
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GenerationResult {
+    /// The generated answer
+    pub answer: String,
+    /// The context used to generate the answer
+    pub context: String,
+    /// Latency in milliseconds
+    pub latency_ms: u64,
+}
+
+/// Trait for LLM text generation (async)
+#[async_trait::async_trait]
+pub trait LLMGenerator: Send + Sync {
+    /// Generate text from a prompt
+    async fn generate(&self, prompt: &str) -> Result<String>;
+}
+
+/// Ollama-based LLM generator (for desktop/server use)
+pub struct OllamaGenerator {
+    base_url: String,
+    model: String,
+}
+
+impl OllamaGenerator {
+    /// Create a new Ollama generator
+    pub fn new(base_url: String, model: String) -> Self {
+        Self { base_url, model }
+    }
+}
+
+#[async_trait::async_trait]
+impl LLMGenerator for OllamaGenerator {
+    async fn generate(&self, prompt: &str) -> Result<String> {
+        let client = reqwest::Client::new();
+        let payload = serde_json::json!({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": false
+        });
+
+        let url = format!("{}/api/generate", self.base_url);
+        let res = client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| CfsError::Embedding(format!("Ollama request failed: {}", e)))?;
+
+        let json: serde_json::Value = res
+            .json()
+            .await
+            .map_err(|e| CfsError::Parse(e.to_string()))?;
+
+        let answer = json["response"]
+            .as_str()
+            .ok_or_else(|| CfsError::Parse("Invalid Ollama response".into()))?
+            .to_string();
+
+        Ok(answer)
+    }
+}
 
 /// Query engine for semantic search
 pub struct QueryEngine {
     graph: Arc<Mutex<cfs_graph::GraphStore>>,
     embedder: Arc<cfs_embeddings::EmbeddingEngine>,
+    generator: Option<Box<dyn LLMGenerator>>,
 }
 
 impl QueryEngine {
@@ -36,7 +99,14 @@ impl QueryEngine {
         Self {
             graph,
             embedder,
+            generator: None,
         }
+    }
+
+    /// Set the LLM generator for RAG
+    pub fn with_generator(mut self, generator: Box<dyn LLMGenerator>) -> Self {
+        self.generator = Some(generator);
+        self
     }
 
     /// Search for relevant chunks using a hybrid (semantic + lexical) approach
@@ -142,12 +212,76 @@ impl QueryEngine {
         self.graph.clone()
     }
 
+    /// Generate an answer using the knowledge graph and an LLM
+    pub async fn generate_answer(&self, query: &str) -> Result<GenerationResult> {
+        let start = std::time::Instant::now();
+        info!("Generating answer for: '{}'", query);
+
+        // 1. Search for relevant chunks
+        let results = self.search(query, 5)?;
+
+        // 2. Assemble context
+        use cfs_core::context_assembler::{ContextAssembler, ScoredChunk};
+        let assembler = ContextAssembler::new(2000); // 2000 approx tokens budget
+        let scored_chunks: Vec<ScoredChunk> = results
+            .iter()
+            .map(|r| ScoredChunk {
+                chunk: r.chunk.clone(),
+                score: r.score,
+            })
+            .collect();
+
+        let context = assembler.assemble(scored_chunks);
+
+        // 3. Prepare Prompt (optimized for SmolLM2 / Mistral ChatML)
+        let prompt = format!(
+            "<|im_start|>system\nYou are a precise assistant. Extract facts from the context to answer the user query accurately.\n- Explicitly list any blockchains, protocols, or projects mentioned.\n- Use bullet points for lists of entities.\n- If the answer is in the context, do not say it is missing.\n- Maintain technical spelling (e.g., zk-SNARKs).\n<|im_end|>\n<|im_start|>user\nContext information:\n{}\n\nQuery: {}<|im_end|>\n<|im_start|>assistant\n",
+            context, query
+        );
+
+        // 4. Generate answer using configured generator or fallback to Ollama
+        let answer = if let Some(ref generator) = self.generator {
+            generator.generate(&prompt).await?
+        } else {
+            // Fallback to Ollama for backward compatibility
+            let client = reqwest::Client::new();
+            let payload = serde_json::json!({
+                "model": "mistral",
+                "prompt": prompt,
+                "stream": false
+            });
+
+            let res = client
+                .post("http://localhost:11434/api/generate")
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e: reqwest::Error| {
+                    CfsError::Embedding(format!("Ollama request failed: {}", e))
+                })?;
+
+            let json: serde_json::Value = res
+                .json()
+                .await
+                .map_err(|e: reqwest::Error| CfsError::Parse(e.to_string()))?;
+
+            json["response"]
+                .as_str()
+                .ok_or_else(|| CfsError::Parse("Invalid Ollama response".into()))?
+                .to_string()
+        };
+
+        Ok(GenerationResult {
+            answer,
+            context,
+            latency_ms: start.elapsed().as_millis() as u64,
+        })
+    }
+
     /// Chat with context from the knowledge graph
-    /// 
-    /// Note: This is a placeholder for Phase 2.
     pub fn chat(&self, _query: &str, _history: &[Message]) -> Result<String> {
-        // TODO: Implement LLM integration in Phase 2
-        Err(CfsError::NotFound("Chat functionality is scheduled for Phase 2".into()))
+        // This will be expanded later in Phase 2
+        Err(CfsError::NotFound("Use generate_answer for Phase 2 initial integration".into()))
     }
 }
 

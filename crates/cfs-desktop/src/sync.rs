@@ -6,7 +6,6 @@ use cfs_sync::{CryptoEngine};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use tracing::info;
-use blake3;
 
 /// Manages synchronization with the relay server
 pub struct SyncManager {
@@ -74,22 +73,35 @@ impl SyncManager {
 
     /// Push pending changes to the relay
     pub async fn push(&self) -> Result<()> {
+        // 1. Compute new semantic root and check if sync is needed
+        let new_semantic_root = {
+            let graph = self.graph.lock().unwrap();
+            graph.compute_merkle_root()?
+        };
+
         let mut diff = {
             let mut pending = self.pending_diff.lock().unwrap();
-            if pending.is_empty() {
-                info!("No pending changes to sync.");
+            
+            // Check current root in DB
+            let current_root_hash = {
+                let graph = self.graph.lock().unwrap();
+                graph.get_latest_root()?.map(|r| r.hash).unwrap_or([0u8; 32])
+            };
+
+            if pending.is_empty() && new_semantic_root == current_root_hash {
+                info!("State is identical and no pending changes. Skipping sync.");
                 return Ok(());
             }
+
             // Swap with new empty diff
-            let old = pending.clone(); // efficient clone? No, huge clone!
-            // TODO: optimize swap
+            let old = pending.clone(); 
             *pending = CognitiveDiff::empty([0u8; 32], Uuid::new_v4(), old.metadata.seq + 1);
             old
         };
 
-        info!("Syncing {} changes...", diff.change_count());
+        info!("Syncing {} semantic changes...", diff.change_count());
 
-        // 1. Get current state root from DB (this is "prev_root" for the diff)
+        // 2. Get current state root from DB (this is "prev_root" for the diff)
         let (prev_root, prev_seq) = {
             let graph = self.graph.lock().unwrap();
             match graph.get_latest_root()? {
@@ -104,24 +116,14 @@ impl SyncManager {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        diff.metadata.device_id = Uuid::new_v4(); // Or persistent ID? DiffMetadata says device_id.
-
-        // 2. Compute new root locally
-        // Phase 2 MVP: new_root = hash(prev_root + diff_hash).
-        let diff_bytes = cfs_sync::serialize_diff(&diff)?;
-        let diff_hash = blake3::hash(&diff_bytes);
-        
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(&prev_root);
-        hasher.update(diff_hash.as_bytes());
-        let new_root_hash = *hasher.finalize().as_bytes();
-        diff.metadata.new_root = new_root_hash;
+        diff.metadata.device_id = Uuid::new_v4(); 
+        diff.metadata.new_root = new_semantic_root;
 
         // 3. Create StateRoot object and Sign it
-        let signature = self.crypto.sign(&new_root_hash).to_bytes();
+        let signature = self.crypto.sign(&new_semantic_root).to_bytes();
 
         let state_root = StateRoot {
-            hash: new_root_hash,
+            hash: new_semantic_root,
             parent: if prev_root == [0u8; 32] { None } else { Some(prev_root) },
             timestamp: diff.metadata.timestamp,
             device_id: diff.metadata.device_id,
@@ -136,15 +138,6 @@ impl SyncManager {
         }
 
         // 5. Encrypt Diff
-        // We need encryption key. CryptoEngine has it.
-        // We need XChaCha20 key. CryptoEngine derives it from seed?
-        // cfs-sync CryptoEngine uses Ed25519 seed.
-        // We need a shared secret or a symmetric key for encryption.
-        // cfs-sync::EncryptedPayload uses `nonce` and `ciphertext`.
-        // cfs-sync::CryptoEngine has `encrypt`.
-        // `encrypt(&self, plaintext) -> EncryptedPayload`.
-        // It uses the ed25519 key for signing, but what for encryption?
-        // 5. Encrypt Diff (Diff now contains correct new_root)
         let payload = self.crypto.encrypt_diff(&diff)?; // Encrypts and Signs
 
         // 6. Upload
@@ -153,5 +146,38 @@ impl SyncManager {
         info!("Sync complete. New root: {}", state_root.hash_hex());
 
         Ok(())
+    }
+
+    /// Pull changes from the relay and apply to local graph
+    pub async fn pull(&self) -> Result<usize> {
+        let remote_roots = self.relay_client.get_roots(None).await?;
+        let mut applied_count = 0;
+        
+        let local_head = {
+            let graph = self.graph.lock().unwrap();
+            graph.get_latest_root()?.map(|r| r.hash)
+        };
+        
+        for root_hex in remote_roots {
+            let root_bytes = hex::decode(&root_hex).map_err(|e| CfsError::Parse(e.to_string()))?;
+            if Some(root_bytes.as_slice().try_into().unwrap()) == local_head {
+                continue; 
+            }
+            
+            let payload = self.relay_client.get_diff(&root_hex).await?;
+            let diff = self.crypto.decrypt_diff(&payload)?;
+            
+            {
+                let mut graph = self.graph.lock().unwrap();
+                graph.apply_diff(&diff)?;
+            }
+            applied_count += 1;
+        }
+
+        if applied_count > 0 {
+            info!("Pulled {} new diffs from relay", applied_count);
+        }
+
+        Ok(applied_count)
     }
 }

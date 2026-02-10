@@ -12,6 +12,7 @@ members = [
     "crates/cfs-mobile",
     "crates/cfs-tests",
     "crates/cfs-desktop-cli",
+    "crates/cfs-inference-mobile",
     "apps/macos/src-tauri",
     "relay/cfs-relay-server",
 ]
@@ -54,6 +55,7 @@ hex = "0.4"
 # Error handling
 thiserror = "2.0"
 anyhow = "1.0"
+async-trait = "0.1"
 
 # Logging
 tracing = "0.1"
@@ -74,6 +76,7 @@ candle-nn = { version = "0.8.2", default-features = false }
 candle-transformers = { version = "0.8.2", default-features = false }
 tokenizers = "0.20"
 ndarray = "0.16"
+llama-cpp-2 = { version = "0.1", default-features = false }
 
 # Vector search (pure Rust HNSW)
 hnsw_rs = "0.3"
@@ -90,3 +93,7 @@ tauri-build = "2.0"
 
 # Testing
 tempfile = "3.14"
+
+[patch.crates-io]
+# Use local patched version of llama-cpp-sys-2 to support GGML_METAL=OFF for simulator
+llama-cpp-sys-2 = { path = "patches/llama-cpp-sys-2" }
