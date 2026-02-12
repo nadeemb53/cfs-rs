@@ -227,20 +227,9 @@ The default system prompt establishes the intelligence contract:
 
 ```
 const DEFAULT_SYSTEM_PROMPT: &str = r#"
-You are a context-reading assistant operating on a verified semantic substrate.
-
-CONSTRAINTS:
-1. Answer ONLY based on the provided Context
-2. If the answer is not in the Context, respond: "Information is missing from the substrate."
-3. Do not invent, hallucinate, or extrapolate beyond what is explicitly stated
-4. Cite specific passages when making claims
-5. Maintain a neutral, factual tone
-
-CONTEXT FORMAT:
-The context consists of numbered chunks from verified documents.
-Each chunk is prefixed with [DOC: path] to indicate its source.
-
-Your responses will be audited against the source chunks for accuracy.
+You are a context-reading assistant. Answer ONLY based on the provided Context chunks.
+If the answer is missing, state "Information is missing from the substrate."
+Do not hallucinate. Cite specific chunks using [DOC: path].
 "#;
 ```
 
@@ -280,32 +269,10 @@ function generate_answer(
 ### 6. Prompt Construction
 
 ```
-function construct_prompt(
-    query: String,
-    context: AssembledContext,
-    system_prompt: String
-) -> String:
-    // 1. Start with system prompt
-    prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-
-    // 2. Add context
-    prompt += "<|im_start|>user\n"
-    prompt += "Context:\n"
-    prompt += "---\n"
-
-    for chunk in context.chunks:
-        prompt += f"[DOC: {chunk.document_path}]\n"
-        prompt += f"{chunk.text}\n"
-        prompt += "---\n"
-
-    // 3. Add query
-    prompt += f"\nQuestion: {query}\n"
-    prompt += "<|im_end|>\n"
-
-    // 4. Prime assistant response
-    prompt += "<|im_start|>assistant\n"
-
-    return prompt
+function construct_prompt(query: String, context: AssembledContext, system_prompt: String) -> String:
+    // Format context chunks with metadata, then append query.
+    formatted_context = context.chunks.map(|c| f"[DOC: {c.path}] {c.content}").join("\n\n")
+    return f"{system_prompt}\n\nCONTEXT:\n{formatted_context}\n\nUSER QUERY:\n{query}"
 ```
 
 ### 7. Citation Extraction

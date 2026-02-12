@@ -214,34 +214,34 @@ function deserialize_vector(bytes: Vec<u8>) -> Vec<i16>:
 interface GraphStore:
     // Document operations
     fn insert_document(doc: Document) -> Result<()>
-    fn get_document(id: UUID) -> Result<Option<Document>>
+    fn get_document(id: ID) -> Result<Option<Document>>
     fn get_document_by_path(path: String) -> Result<Option<Document>>
-    fn delete_document(id: UUID) -> Result<()>
+    fn delete_document(id: ID) -> Result<()>
     fn all_documents() -> Result<Vec<Document>>
 
     // Chunk operations
     fn insert_chunk(chunk: Chunk) -> Result<()>
-    fn get_chunk(id: UUID) -> Result<Option<Chunk>>
-    fn chunks_for_document(doc_id: UUID) -> Result<Vec<Chunk>>
-    fn delete_chunks_for_document(doc_id: UUID) -> Result<()>
+    fn get_chunk(id: ID) -> Result<Option<Chunk>>
+    fn chunks_for_document(doc_id: ID) -> Result<Vec<Chunk>>
+    fn delete_chunks_for_document(doc_id: ID) -> Result<()>
     fn all_chunks() -> Result<Vec<Chunk>>
 
     // Embedding operations
     fn insert_embedding(emb: Embedding) -> Result<()>
-    fn get_embedding(id: UUID) -> Result<Option<Embedding>>
-    fn embeddings_for_chunk(chunk_id: UUID) -> Result<Vec<Embedding>>
+    fn get_embedding(id: ID) -> Result<Option<Embedding>>
+    fn embeddings_for_chunk(chunk_id: ID) -> Result<Vec<Embedding>>
     fn all_embeddings() -> Result<Vec<Embedding>>
 
     // Vector search
-    fn vector_search(query: Vec<i16>, k: usize) -> Result<Vec<(UUID, f32)>>
+    fn vector_search(query: Vec<i16>, k: usize) -> Result<Vec<(ID, f32)>>
 
     // Full-text search
-    fn fts_search(query: String, limit: usize) -> Result<Vec<(UUID, f32)>>
+    fn fts_search(query: String, limit: usize) -> Result<Vec<(ID, f32)>>
 
     // Edge operations
     fn insert_edge(edge: Edge) -> Result<()>
-    fn edges_from(source_id: UUID) -> Result<Vec<Edge>>
-    fn edges_to(target_id: UUID) -> Result<Vec<Edge>>
+    fn edges_from(source_id: ID) -> Result<Vec<Edge>>
+    fn edges_to(target_id: ID) -> Result<Vec<Edge>>
     fn all_edges() -> Result<Vec<Edge>>
 
     // State operations
@@ -348,7 +348,7 @@ function add_embedding(emb: Embedding):
     vector = deserialize_vector(emb.vector)
     hnsw.add(emb.id, vector)
 
-function remove_embedding(id: UUID):
+function remove_embedding(id: ID):
     // 1. Mark as deleted in HNSW (lazy deletion)
     hnsw.mark_deleted(id)
 
@@ -366,7 +366,7 @@ When a document is deleted, all related entities are automatically removed:
 -- embeddings.chunk_id REFERENCES chunks(id) ON DELETE CASCADE
 
 -- Application must also update HNSW index:
-function delete_document(doc_id: UUID):
+function delete_document(doc_id: ID):
     // 1. Get all embeddings that will be deleted
     chunk_ids = db.query(
         "SELECT id FROM chunks WHERE document_id = ?",

@@ -30,15 +30,22 @@ type ID = [u8; 16];  // 128-bit identifier
 ```
 
 **Generation Algorithm**:
+**Generation Algorithm**:
+
+IDs are the first 16 bytes of the BLAKE3 hash of the input.
+
 ```rust
-function generate_id(input: bytes) -> ID:
-    hash = BLAKE3(input)
-    return hash[0..16]  // First 16 bytes
+fn generate_id(input: &[u8]) -> ID {
+    let hash = blake3::hash(input);
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&hash.as_bytes()[0..16]);
+    id
+}
 ```
 
 **Rationale**:
 - **Deterministic**: Derived purely from input.
-- **Fast**: No UUIDv5 SHA-1 overhead; uses BLAKE3.
+- **Fast**: Uses BLAKE3 SIMD implementation.
 - **Compact**: 16 bytes fits in standard UUID fields for DB compatibility.
 - **Collision Resistant**: 128-bits provides adequate collision resistance for local graphs (~3x10^38 possibilities).
 
@@ -50,7 +57,7 @@ A **Document** represents an ingested file in the substrate.
 
 ```
 Document {
-    id:              UUID        // Deterministic identifier (UUIDv5)
+    id:              ID          // Deterministic identifier (BLAKE3-16)
     path:            String      // Original filesystem path
     content_hash:    [u8; 32]    // BLAKE3 hash of file contents
     hierarchical_hash: [u8; 32]  // BLAKE3 hash of all chunk hashes
@@ -80,7 +87,7 @@ hierarchical_hash = BLAKE3(
 
 This enables verification that chunk content has not been modified.
 
-Where `CHUNK_NAMESPACE` is the fixed UUID: `6ba7b811-9dad-11d1-80b4-00c04fd430c8`.
+This enables verification that chunk content has not been modified.
 
 #### Overlap Semantics
 
@@ -103,8 +110,8 @@ An **Embedding** represents the vector representation of a chunk.
 
 ```
 Embedding {
-    id:              UUID        // Deterministic identifier (UUIDv5)
-    chunk_id:        UUID        // Source chunk reference
+    id:              ID          // Deterministic identifier (BLAKE3-16)
+    chunk_id:        ID          // Source chunk reference
     vector:          [i16; N]    // Embedding vector (i16 quantization)
     model_hash:      [u8; 32]    // BLAKE3 hash of model identifier
     l2_norm:         f32         // Precomputed L2 norm for similarity
@@ -172,8 +179,8 @@ An **Edge** represents a relationship between entities in the substrate.
 
 ```
 Edge {
-    source_id:       UUID        // Source entity
-    target_id:       UUID        // Target entity
+    source_id:       ID          // Source entity
+    target_id:       ID          // Target entity
     kind:            EdgeKind    // Relationship type
     weight:          Option<f32> // Optional relationship strength
 }
@@ -205,7 +212,7 @@ StateRoot {
     hash:            [u8; 32]    // BLAKE3 Merkle root
     parent_hash:     Option<[u8; 32]>  // Previous state root (chain)
     timestamp:       i64         // Unix timestamp (milliseconds)
-    device_id:       UUID        // Originating device
+    device_id:       ID          // Originating device
     signature:       [u8; 64]    // Ed25519 signature
     sequence:        u64         // Monotonic sequence number
 }
@@ -245,16 +252,20 @@ CognitiveDiff {
     edges:           Vec<Edge>
 
     // Removed entity IDs
-    removed_documents:   Vec<UUID>
-    removed_chunks:      Vec<UUID>
-    removed_embeddings:  Vec<UUID>
-    removed_edges:       Vec<(UUID, UUID, EdgeKind)>
+    removed_documents:   Vec<ID>
+    removed_chunks:      Vec<ID>
+    removed_embeddings:  Vec<ID>
+    removed_edges:       Vec<(ID, ID, EdgeKind)>
+    removed_documents:   Vec<ID>
+    removed_chunks:      Vec<ID>
+    removed_embeddings:  Vec<ID>
+    removed_edges:       Vec<(ID, ID, EdgeKind)>
 
     // Metadata
     prev_root:       [u8; 32]    // State root before diff
     new_root:        [u8; 32]    // State root after diff
     timestamp:       i64         // Creation timestamp
-    device_id:       UUID        // Originating device
+    device_id:       ID          // Originating device
     sequence:        u64         // Diff sequence number
 }
 ```
@@ -330,7 +341,7 @@ Input:
     content_hash = 0xaf1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262
 
 Expected:
-    document_id = UUID("a7f3b2c1-4d5e-5f6a-8b9c-0d1e2f3a4b5c")
+    document_id = ID("a7f3b2c1-4d5e-5f6a-8b9c-0d1e2f3a4b5c")
 ```
 
 ### Chunk ID Generation
@@ -341,11 +352,10 @@ Input:
     text_hash = BLAKE3(text)
 
 Expected:
-    chunk_id = UUID("b8c4d3e2-5f6a-5b7c-9d0e-1f2a3b4c5d6e")
+    chunk_id = ID("b8c4d3e2-5f6a-5b7c-9d0e-1f2a3b4c5d6e")
 ```
 
 ## References
 
-- [RFC 4122: UUID URN Namespace](https://tools.ietf.org/html/rfc4122)
 - [BLAKE3 Specification](https://github.com/BLAKE3-team/BLAKE3-specs)
 - [RFC 8949: CBOR](https://tools.ietf.org/html/rfc8949)
