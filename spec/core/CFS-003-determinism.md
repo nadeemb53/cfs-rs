@@ -227,7 +227,6 @@ This ensures all devices download **exactly the same bytes**.
 Embeddings are uniquely identified by their inputs:
 
 ```
-```
 function compute_embedding_id(
     text_hash: [u8; 32],
     model_manifest_hash: [u8; 32],
