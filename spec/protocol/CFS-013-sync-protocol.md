@@ -107,53 +107,13 @@ function generate_device_identity() -> DeviceIdentity:
 When the substrate changes, a diff is generated:
 
 ```
-function generate_diff(
-    old_state: StateRoot,
-    new_state: StateRoot,
-    graph: GraphStore
-) -> CognitiveDiff:
-    // 1. Get all entities at each state
-    old_docs = graph.documents_at(old_state)
-    new_docs = graph.documents_at(new_state)
-
-    old_chunks = graph.chunks_at(old_state)
-    new_chunks = graph.chunks_at(new_state)
-
-    old_embs = graph.embeddings_at(old_state)
-    new_embs = graph.embeddings_at(new_state)
-
-    old_edges = graph.edges_at(old_state)
-    new_edges = graph.edges_at(new_state)
-
-    // 2. Compute additions/updates
-    added_docs = new_docs.difference(old_docs)
-    added_chunks = new_chunks.difference(old_chunks)
-    added_embs = new_embs.difference(old_embs)
-    added_edges = new_edges.difference(old_edges)
-
-    // 3. Compute removals
-    removed_docs = old_docs.keys().difference(new_docs.keys())
-    removed_chunks = old_chunks.keys().difference(new_chunks.keys())
-    removed_embs = old_embs.keys().difference(new_embs.keys())
-    removed_edges = old_edges.keys().difference(new_edges.keys())
-
-    // 4. Build diff
+function generate_diff(old_state: StateRoot, new_state: StateRoot, graph: GraphStore) -> CognitiveDiff:
+    // Compare entities at both states to determine additions and removals.
+    // Returns a complete diff object with added/removed documents, chunks, embeddings, and edges.
     return CognitiveDiff {
-        documents: added_docs,
-        chunks: added_chunks,
-        embeddings: added_embs,
-        edges: added_edges,
-
-        removed_documents: removed_docs,
-        removed_chunks: removed_chunks,
-        removed_embeddings: removed_embs,
-        removed_edges: removed_edges,
-
-        prev_root: old_state.hash,
-        new_root: new_state.hash,
-        timestamp: now(),
-        device_id: device.id,
-        sequence: old_state.sequence + 1,
+        added: calculate_added_entities(old_state, new_state),
+        removed: calculate_removed_entities(old_state, new_state),
+        // ... metadata
     }
 ```
 
@@ -201,28 +161,13 @@ struct EncryptedDiff {
 }
 
 function encrypt_diff(diff: CognitiveDiff, key: [u8; 32]) -> EncryptedDiff:
-    // 1. Serialize diff
     plaintext = serialize_diff(diff)
-
-    // 2. Generate random nonce
     nonce = random_bytes(24)
-
-    // 3. Encrypt with XChaCha20-Poly1305
     (ciphertext, tag) = xchacha20_poly1305_encrypt(plaintext, key, nonce)
-
-    return EncryptedDiff {
-        nonce,
-        ciphertext,
-        tag,
-        sender_id: diff.device_id,
-        sequence: diff.sequence,
-    }
+    return EncryptedDiff { nonce, ciphertext, tag, ... }
 
 function decrypt_diff(enc: EncryptedDiff, key: [u8; 32]) -> CognitiveDiff:
-    // 1. Decrypt
     plaintext = xchacha20_poly1305_decrypt(enc.ciphertext, key, enc.nonce, enc.tag)
-
-    // 2. Deserialize
     return deserialize_diff(plaintext)
 ```
 
@@ -304,80 +249,26 @@ The relay server:
 
 ```
 function push_to_relay(diff: CognitiveDiff, device: DeviceIdentity, relay_url: String):
-    // 1. Derive shared key (established during pairing)
     key = load_shared_key(device.id)
-
-    // 2. Encrypt diff
     encrypted = encrypt_diff(diff, key)
-
-    // 3. Sign diff
     signed = sign_diff(encrypted, device.private_key)
-
-    // 4. Push to relay
-    response = http::post(
-        relay_url + "/push",
-        headers = {
-            "X-Device-ID": device.device_id,
-            "X-Recipient-ID": recipient_device_id,
-        },
-        body = signed.to_bytes()
-    )
-
-    if !response.success:
-        raise SyncError("Push failed")
-
-    // 5. Record sync state
-    record_pushed(diff.sequence)
+    
+    http::post(relay_url + "/push", body = signed)
 ```
 
 ### 10. Pull Flow (Relay → Mobile)
 
 ```
 function pull_from_relay(device: DeviceIdentity, relay_url: String, graph: GraphStore):
-    // 1. Get last synced sequence
-    last_sequence = get_last_synced_sequence(device.id)
-
-    // 2. Pull new diffs
-    response = http::get(
-        relay_url + "/pull",
-        headers = {
-            "X-Device-ID": device.device_id,
-        },
-        query = { "since": last_sequence }
-    )
-
-    // 3. Process each diff
-    for signed_diff in response.diffs:
-        // 3a. Verify signature
-        if !verify_signature(signed_diff):
-            raise SyncError("Invalid signature")
-
-        // 3b. Decrypt
-        key = load_shared_key(signed_diff.encrypted_diff.sender_id)
-        diff = decrypt_diff(signed_diff.encrypted_diff, key)
-
-        // 3c. Verify state transition
-        current_root = graph.get_latest_state_root()
-        if diff.prev_root != current_root.hash:
-            raise SyncError("State root mismatch")
-
-        // 3d. Apply diff
+    last_seq = get_last_synced_sequence(device.id)
+    diffs = http::get(relay_url + "/pull", query = { since: last_seq })
+    
+    for signed in diffs:
+        verify_signature(signed)
+        diff = decrypt_diff(signed.encrypted, key)
+        validate_state_transition(diff, graph)
         apply_diff(diff, graph)
-
-        // 3e. Verify new state root
-        computed_root = graph.compute_state_root()
-        if computed_root != diff.new_root:
-            raise SyncError("State verification failed")
-
-        // 3f. Acknowledge receipt
-        http::delete(
-            relay_url + "/acknowledge",
-            headers = { "X-Device-ID": device.device_id },
-            body = { "sequence": diff.sequence }
-        )
-
-        // 3g. Record progress
-        record_synced(diff.sequence)
+        acknowledge_receipt(relay_url, diff.sequence)
 ```
 
 ### 11. Diff Application

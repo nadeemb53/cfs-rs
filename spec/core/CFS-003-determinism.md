@@ -522,7 +522,7 @@ CFS uses **Hybrid Logical Clocks (HLC)** instead of wall clocks.
 struct HybridTimestamp {
     wall_time: u64,      // Physical time (milliseconds since epoch)
     logical: u32,        // Logical counter
-    device_id: UUID,     // Originating device
+    device_id: ID,       // Originating device
 }
 ```
 
@@ -601,12 +601,12 @@ enum Operation {
     },
 
     RemoveDocument {
-        document_id: UUID,
+        document_id: ID,
         timestamp: HybridTimestamp,
     },
 
     UpdateDocument {
-        document_id: UUID,
+        document_id: ID,
         new_chunks: Vec<Chunk>,
         new_embeddings: Vec<CanonicalEmbedding>,
         timestamp: HybridTimestamp,
@@ -620,27 +620,11 @@ Each operation has a deterministic hash:
 
 ```
 function hash_operation(op: Operation) -> [u8; 32]:
-    canonical_bytes = match op:
-        AddDocument { document, chunks, embeddings, timestamp } =>
-            serialize_canonical([
-                "ADD_DOCUMENT",
-                document.to_canonical_bytes(),
-                chunks.sort_by(|c| c.id).map(|c| c.to_canonical_bytes()),
-                embeddings.sort_by(|e| e.hash).map(|e| e.bytes),
-                timestamp.to_bytes(),
-            ])
-
-        RemoveDocument { document_id, timestamp } =>
-            serialize_canonical([
-                "REMOVE_DOCUMENT",
-                document_id.to_bytes(),
-                timestamp.to_bytes(),
-            ])
-
-        UpdateDocument { ... } =>
-            // Similar pattern
-
-    return BLAKE3(canonical_bytes)
+    // Serializes the operation components (opcode + arguments) to canonical bytes
+    // and returns the BLAKE3 hash.
+    // Ensure all collections (chunks, embeddings) are sorted by ID before hashing.
+    let canonical_bytes = op.to_canonical_bytes();
+    return blake3::hash(canonical_bytes)
 ```
 
 #### 9.3 Deterministic Apply
@@ -704,7 +688,7 @@ struct ExecutionTrace {
     embedding_outputs: Vec<[u8; 32]>,       // Output hashes
 
     timestamp: HybridTimestamp,
-    device_id: UUID,
+    device_id: ID,
     signature: [u8; 64],
 }
 ```
@@ -788,17 +772,11 @@ function detect_conflicts(
     return conflicts
 
 function operations_conflict(a: Operation, b: Operation) -> bool:
-    // Same document touched by different operations
+    // Example: Two operations modifying the same document ID conflict.
     match (a, b):
-        (AddDocument { document: d1, .. }, AddDocument { document: d2, .. }) =>
-            d1.path == d2.path  // Same path = conflict
-
-        (UpdateDocument { document_id: id1, .. }, UpdateDocument { document_id: id2, .. }) =>
-            id1 == id2  // Same document = conflict
-
-        (RemoveDocument { document_id: id1, .. }, UpdateDocument { document_id: id2, .. }) =>
-            id1 == id2  // Remove vs update = conflict
-
+        (AddDocument(d1, ..), AddDocument(d2, ..)) => d1.path == d2.path
+        (UpdateDocument(id1, ..), UpdateDocument(id2, ..)) => id1 == id2
+        (RemoveDocument(id1, ..), UpdateDocument(id2, ..)) => id1 == id2
         _ => false
 ```
 

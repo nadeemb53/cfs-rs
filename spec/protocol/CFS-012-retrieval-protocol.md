@@ -82,26 +82,11 @@ function embed_query_canonical(query: String, model: EmbeddingModel) -> Canonica
 #### Vector Search (Integer Math)
 
 ```
-function semantic_search(
-    query: Vec<i16>,
-    hnsw: HNSWIndex,
-    k: usize
-) -> Vec<SearchResult>:
-    // 1. Query HNSW index using Integer Dot Product
-    // Returns (embedding_id, distance) pairs
+function semantic_search(query: Vec<i16>, hnsw: HNSWIndex, k: usize) -> Vec<SearchResult>:
+    // Query HNSW index using Integer Dot Product, then normalize scores.
     neighbors = hnsw.search_i16(query, k)
-
-    // 2. Convert distance to similarity score (0.0 - 1.0)
-    // HNSW distance is roughly inverse of similarity
-    results = neighbors.map(|(id, dist)| {
-        SearchResult {
-            embedding_id: id,
-            score: normalize_score(dist), 
-        }
-    })
-
-    // 3. Sort by score descending
-    return results.sort_by(|r| -r.score)
+    return neighbors.map(|(id, dist)| SearchResult { id, score: normalize(dist) })
+                    .sort_by(|r| -r.score)
 ```
 
 #### HNSW Parameters
@@ -134,37 +119,11 @@ function parse_fts_query(query: String) -> FTSQuery:
 #### Full-Text Search
 
 ```
-function lexical_search(
-    query: FTSQuery,
-    db: SQLite,
-    limit: usize
-) -> Vec<SearchResult>:
-    // 1. Build FTS5 query string
-    fts_query = query.terms.join(" OR ")
-    for phrase in query.phrases:
-        fts_query += f' "{phrase}"'
-
-    // 2. Execute FTS query with BM25 ranking
-    sql = """
-        SELECT chunk_id, bm25(fts_chunks) as score
-        FROM fts_chunks
-        WHERE fts_chunks MATCH ?
-        ORDER BY score
-        LIMIT ?
-    """
-    rows = db.query(sql, [fts_query, limit])
-
-    // 3. Normalize scores (BM25 is negative, lower = better)
-    min_score = rows.map(|r| r.score).min()
-    max_score = rows.map(|r| r.score).max()
-    range = max_score - min_score
-
-    results = rows.map(|r| SearchResult {
-        chunk_id: r.chunk_id,
-        score: (r.score - min_score) / range,  // Normalize to 0-1
-    })
-
-    return results
+function lexical_search(query: FTSQuery, db: SQLite, limit: usize) -> Vec<SearchResult>:
+    // Execute FTS5 query with BM25 ranking, then normalize scores to 0-1 range.
+    sql = "SELECT chunk_id, bm25(fts_chunks) FROM fts_chunks WHERE ... ORDER BY score"
+    rows = db.query(sql, [query.to_sql(), limit])
+    return normalize_scores(rows)
 ```
 
 ### 4. Reciprocal Rank Fusion (RRF)
@@ -174,33 +133,17 @@ RRF combines multiple ranked lists into a single ranking.
 #### Algorithm
 
 ```
-function rrf_fusion(
-    semantic_results: Vec<SearchResult>,
-    lexical_results: Vec<SearchResult>,
-    k: f32 = 60.0
-) -> Vec<SearchResult>:
-    // 1. Build score maps indexed by chunk_id
-    scores: HashMap<UUID, f32> = HashMap::new()
+function rrf_fusion(semantic_results: Vec<SearchResult>, lexical_results: Vec<SearchResult>, k: f32 = 60.0) -> Vec<SearchResult>:
+    // Combine rankings: score = 1.0 / (k + rank + 1)
+    scores = HashMap::new()
+    
+    for (rank, res) in semantic_results.enumerate():
+        scores[res.chunk_id] += 1.0 / (k + rank + 1)
+        
+    for (rank, res) in lexical_results.enumerate():
+        scores[res.chunk_id] += 1.0 / (k + rank + 1)
 
-    // 2. Add semantic scores
-    for (rank, result) in semantic_results.enumerate():
-        // Get chunk_id from embedding
-        chunk_id = get_chunk_id(result.embedding_id)
-        rrf_score = 1.0 / (k + rank + 1)
-        scores[chunk_id] = scores.get(chunk_id, 0) + rrf_score
-
-    // 3. Add lexical scores
-    for (rank, result) in lexical_results.enumerate():
-        chunk_id = result.chunk_id
-        rrf_score = 1.0 / (k + rank + 1)
-        scores[chunk_id] = scores.get(chunk_id, 0) + rrf_score
-
-    // 4. Convert to sorted results
-    fused = scores.entries()
-        .map(|(id, score)| SearchResult { chunk_id: id, score: score })
-        .sort_by(|r| -r.score)
-
-    return fused
+    return scores.entries().sort_by(|r| -r.score)
 ```
 
 #### Why k=60?

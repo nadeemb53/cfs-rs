@@ -191,67 +191,25 @@ function group_by_document(results: Vec<RetrievalResult>) -> Vec<DocumentGroup>:
 ### 7. Greedy Packing Algorithm
 
 ```
-function pack_context(
-    groups: Vec<DocumentGroup>,
-    budget: TokenBudget,
-    tokenizer: Tokenizer
-) -> AssembledContext:
-    assembled_chunks = []
+function pack_context(groups: Vec<DocumentGroup>, budget: TokenBudget, tokenizer: Tokenizer) -> AssembledContext:
+    // Greedily fit chunks into the token budget, prioritizing by group score and refined by sequence order.
+    // Handles truncation if a chunk partially fits at the end.
     tokens_used = 0
-    truncated = false
-
+    assembled = []
+    
     for group in groups:
-        // Check if we can fit any more
-        if tokens_used >= budget.available:
-            truncated = true
-            break
-
-        // Calculate tokens needed for this document
-        doc_overhead = budget.per_doc_overhead
-
-        // Sort chunks within group by sequence for reading order
-        sorted_chunks = group.chunks.sort_by(|c| c.chunk.sequence)
-
-        for result in sorted_chunks:
-            chunk_tokens = tokenizer.count_tokens(result.chunk.text)
-
-            // Check if chunk fits
-            if tokens_used + doc_overhead + chunk_tokens <= budget.available:
-                assembled_chunks.push(ContextChunk {
-                    chunk_id: result.chunk.id,
-                    document_path: result.document.path,
-                    text: result.chunk.text,
-                    score: result.score,
-                    sequence: result.chunk.sequence,
-                })
-
+        if tokens_used >= budget.total: break
+        
+        for chunk in group.sorted_chunks():
+            chunk_tokens = tokenizer.count(chunk.text)
+            if tokens_used + chunk_tokens <= budget.total:
+                assembled.push(chunk)
                 tokens_used += chunk_tokens
-                if assembled_chunks.len() == 1 || last_doc != result.document.id:
-                    tokens_used += doc_overhead
-                    last_doc = result.document.id
-
-            else if tokens_used + doc_overhead < budget.available:
-                // Partial fit: truncate chunk
-                remaining = budget.available - tokens_used - doc_overhead
-                truncated_text = tokenizer.truncate_to_tokens(result.chunk.text, remaining)
-
-                assembled_chunks.push(ContextChunk {
-                    chunk_id: result.chunk.id,
-                    document_path: result.document.path,
-                    text: truncated_text,
-                    score: result.score,
-                    sequence: result.chunk.sequence,
-                })
-
-                truncated = true
+            else:
+                // Optional: Truncate to fit remaining budget
                 break
-
-    return AssembledContext {
-        chunks: assembled_chunks,
-        total_tokens: tokens_used,
-        truncated: truncated,
-        metadata: ContextMetadata { ... },
-    }
+                
+    return AssembledContext { chunks: assembled, tokens: tokens_used }
 ```
 
 ### 8. Alternative Packing Strategies

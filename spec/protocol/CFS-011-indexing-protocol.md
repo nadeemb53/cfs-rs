@@ -83,31 +83,8 @@ function parse_text(content: bytes) -> String:
 ```
 function parse_markdown(content: bytes) -> ParsedDocument:
     text = parse_text(content)
-
-    // 1. Extract frontmatter (if present)
-    if text.starts_with("---"):
-        (frontmatter, body) = extract_frontmatter(text)
-    else:
-        frontmatter = None
-        body = text
-
-    // 2. Parse markdown structure
-    ast = markdown_parse(body)
-
-    // 3. Extract sections
-    sections = []
-    for node in ast:
-        match node:
-            Heading(level, text) =>
-                sections.push(Section { level, title: text, content: "" })
-            Paragraph(text) =>
-                sections.last().content += text + "\n"
-            CodeBlock(lang, code) =>
-                sections.last().content += f"```{lang}\n{code}\n```\n"
-            List(items) =>
-                for item in items:
-                    sections.last().content += f"- {item}\n"
-
+    // Extract frontmatter if present, then parse AST to identify sections (headers, lists, etc).
+    // Returns a structured document preserving semantic hierarchy.
     return ParsedDocument { frontmatter, sections }
 ```
 
@@ -157,67 +134,28 @@ function parse_code(content: bytes, language: String) -> String:
 
 ```
 function chunk_text(text: String, params: ChunkParams) -> Vec<ChunkData>:
+    // Iterate through text, finding semantic boundaries (paragraphs, sentences)
+    // that fit within target_chunk_size, respecting overlap.
     chunks = []
-    current_offset = 0
-    sequence = 0
-
-    while current_offset < text.len():
-        // 1. Find chunk boundary
-        chunk_end = find_chunk_boundary(
-            text,
-            current_offset,
-            params.target_chunk_size,
-            params.max_chunk_size,
-            params.separator_priority
-        )
-
-        // 2. Extract chunk text
-        chunk_text = text[current_offset:chunk_end]
-
-        // 3. Create chunk
-        chunks.push(ChunkData {
-            text: chunk_text,
-            byte_offset: current_offset,
-            byte_length: chunk_end - current_offset,
-            sequence: sequence,
-        })
-
-        // 4. Move to next position (with overlap)
-        next_offset = chunk_end - params.overlap
-        if next_offset <= current_offset:
-            next_offset = chunk_end  // Avoid infinite loop
-
-        current_offset = next_offset
-        sequence += 1
-
+    offset = 0
+    while offset < text.len():
+        end = find_boundary(text, offset, params)
+        chunks.push(create_chunk(text[offset..end]))
+        offset = end - params.overlap
     return chunks
 ```
 
 #### 4.3 Boundary Detection
 
 ```
-function find_chunk_boundary(
-    text: String,
-    start: usize,
-    target_size: usize,
-    max_size: usize,
-    separators: Vec<String>
-) -> usize:
-    end = min(start + max_size, text.len())
-    target = start + target_size
-
-    // Try each separator in priority order
-    for separator in separators:
-        // Look for separator near target
-        search_start = max(target - 64, start)
-        search_end = min(target + 64, end)
-        search_region = text[search_start:search_end]
-
-        if let Some(pos) = search_region.rfind(separator):
-            return search_start + pos + separator.len()
-
-    // No separator found, hard break at max size
-    return min(start + max_size, text.len())
+function find_chunk_boundary(text: String, start: usize, params: ChunkParams) -> usize:
+    // Try separators in priority order (e.g., \n\n, \n, . ) near the target size.
+    // If no separator found within range, hard break at chunk limit.
+    target = start + params.target_size
+    for sep in params.separators:
+        if let Some(pos) = find_separator_near(text, target, sep):
+            return pos
+    return min(start + params.max_size, text.len())
 ```
 
 #### 4.4 Section-Aware Chunking (Markdown)
@@ -329,71 +267,27 @@ function compute_hierarchical_hash(chunks: Vec<Chunk>) -> [u8; 32]:
 
 ```
 function ingest_file(path: String, graph: GraphStore) -> Result<IngestResult>:
-    // 1. Read file
-    content = fs::read(path)?
-
-    // 2. Check if already indexed
-    content_hash = BLAKE3(content)
-    if let Some(existing) = graph.get_document_by_content_hash(content_hash):
-        return Ok(IngestResult::AlreadyExists(existing.id))
-
-    // 3. Create document
+    // 1. Read and Parse
+    content = fs::read(path)
+    if is_duplicate(content): return AlreadyExists
+    
     doc = create_document(path, content)
-
-    // 4. Parse content
-    mime = doc.mime_type
-    parsed = match mime:
-        "text/markdown" => parse_markdown(content)
-        "application/pdf" => parse_pdf(content)
-        _ => parse_text(content)
-
-    // 5. Chunk content
-    params = ChunkParams::default()
-    chunk_data = match mime:
-        "text/markdown" => chunk_markdown(parsed, params)
-        _ => chunk_text(parsed.text, params)
-
-    // 6. Create chunks
-    chunks = create_chunks(doc, chunk_data)
-
-    // 7. Compute hierarchical hash
-    doc.hierarchical_hash = compute_hierarchical_hash(chunks)
-
-    // 8. Generate embeddings
-    embeddings = embed_batch(chunks, model)
-
-    // 9. Begin transaction (Canonical State Update)
+    parsed = parse_content(doc, content)
+    
+    // 2. Chunk and Embed
+    chunks = chunk_content(parsed)
+    embeddings = embed_batch(chunks)
+    
+    // 3. Atomic Commit
     tx = graph.begin_transaction()
-
     try:
-        // 10. Insert document
-        graph.insert_document(doc)
-
-        // 11. Insert chunks
-        graph.insert_chunks(chunks)
-
-        // 12. Insert embeddings (Canonical State: Sorted List in DB)
-        graph.insert_embeddings(embeddings)
-
-        // 13. Create edges
-        for (chunk, emb) in zip(chunks, embeddings):
-            graph.insert_edge(Edge::DocToChunk(doc.id, chunk.id))
-            graph.insert_edge(Edge::ChunkToEmbedding(chunk.id, emb.id))
-
-        // 14. Commit to Canonical State
-        // This makes the data durable and verifies the Merkle root
-        graph.commit_transaction(tx)
-
-        // 15. Update Runtime Index (Transient)
-        // This updates the local HNSW cache for fast retrieval.
-        // It is NOT part of the atomic state commit.
-        graph.update_runtime_index(embeddings)
-
-        return Ok(IngestResult::Ingested(doc.id, chunks.len()))
-
-    except error:
-        graph.rollback_transaction(tx)
-        raise error
+        graph.insert_all(doc, chunks, embeddings)
+        graph.commit(tx)
+        graph.update_runtime_index_async(embeddings)
+        return Ingested(doc.id)
+    catch:
+        graph.rollback(tx)
+        raise
 ```
 
 ### 9. Incremental Updates

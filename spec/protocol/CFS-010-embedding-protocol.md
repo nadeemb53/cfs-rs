@@ -157,20 +157,9 @@ CFS uses **mean pooling** over token embeddings.
 
 ```
 function mean_pooling(hidden_states: Vec<Vec<f32>>, attention_mask: Vec<i64>) -> Vec<f32>:
-    // 1. Expand attention mask to hidden dimension
-    mask = attention_mask.expand(hidden_dim)
-
-    // 2. Apply mask to hidden states
-    masked = hidden_states * mask
-
-    // 3. Sum over sequence dimension
-    summed = masked.sum(axis=0)
-
-    // 4. Count non-padded tokens
-    counts = attention_mask.sum()
-
-    // 5. Divide by counts (mean)
-    return summed / counts
+    // Sum hidden states where mask is 1, then divide by count of non-padded tokens.
+    // Returns a single vector representation of the sequence.
+    return (hidden_states * mask).sum(axis=0) / mask.sum()
 ```
 
 #### Why Mean Pooling?
@@ -214,17 +203,9 @@ Embeddings are quantized to **signed 16-bit integers** to ensure cross-platform 
 ```
 function quantize_f32_to_i16(vector: Vec<f32>) -> Vec<i16>:
     return vector.map(|x| {
-        // 1. Scale to i16 range (removing outliers > 1.0)
-        // using SoftFloat logic implicitly
+        // Scale to i16 range and round deterministically (with dead-zone)
         scaled = x * 32767.0
-
-        // 2. Robust Rounding (Dead-zone)
-        // If value is extremely close to x.5, snap to lower magnitude
-        // to prevent architecture-specific rounding jitter.
-        if is_near_boundary(scaled):
-            return floor(scaled)
-        
-        // 3. Round to nearest integer
+        if is_near_boundary(scaled): return floor(scaled)
         return round_half_to_even(scaled) as i16
     })
 ```
