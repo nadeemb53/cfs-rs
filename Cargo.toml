@@ -51,6 +51,7 @@ uuid = { version = "1.11", features = ["v4", "v5", "serde"] }
 half = { version = "2.4", features = ["serde"] }
 base64 = "0.21"
 hex = "0.4"
+unicode-normalization = "0.1"
 
 # Error handling
 thiserror = "2.0"

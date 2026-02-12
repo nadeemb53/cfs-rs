@@ -1,6 +1,4 @@
-//! Document parsers for different file formats
-
-use cfs_core::{CfsError, Result};
+use cfs_core::{CfsError, Result, text};
 use std::path::Path;
 
 /// Trait for document parsers
@@ -94,7 +92,7 @@ impl Parser for MarkdownParser {
             }
         }
         
-        Ok(normalize_text(&text))
+        Ok(text::normalize(&text))
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -108,7 +106,7 @@ struct TextParser;
 impl Parser for TextParser {
     fn parse(&self, path: &Path) -> Result<String> {
         let content = std::fs::read_to_string(path)?;
-        Ok(normalize_text(&content))
+        Ok(text::normalize(&content))
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -124,21 +122,12 @@ impl Parser for PdfParser {
         let bytes = std::fs::read(path)?;
         let text = pdf_extract::extract_text_from_mem(&bytes)
             .map_err(|e| CfsError::Parse(format!("PDF extraction failed: {}", e)))?;
-        Ok(normalize_text(&text))
+        Ok(text::normalize(&text))
     }
 
     fn supported_extensions(&self) -> &[&str] {
         &["pdf"]
     }
-}
-
-/// Normalize text: trim, collapse whitespace, normalize unicode
-fn normalize_text(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
 }
 
 #[cfg(test)]
