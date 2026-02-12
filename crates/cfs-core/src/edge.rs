@@ -40,7 +40,8 @@ impl EdgeKind {
 /// An edge in the semantic graph
 ///
 /// Represents a directed relationship between two nodes.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Per CFS-001 §2.5: edges connect nodes with typed relationships.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Edge {
     /// Source node ID
     pub source: Uuid,
@@ -52,7 +53,11 @@ pub struct Edge {
     pub kind: EdgeKind,
 
     /// Optional weight/score (e.g., similarity score for ChunkToChunk)
-    pub weight: Option<u16>, // Stored as fixed-point: actual = weight / 10000
+    /// Per CFS-001: stored as f32 in range [0.0, 1.0]
+    pub weight: Option<f32>,
+
+    /// Optional metadata string (e.g., relationship context)
+    pub metadata: Option<String>,
 }
 
 impl Edge {
@@ -63,24 +68,19 @@ impl Edge {
             target,
             kind,
             weight: None,
+            metadata: None,
         }
     }
 
     /// Create a weighted edge (e.g., for similarity scores)
     pub fn with_weight(source: Uuid, target: Uuid, kind: EdgeKind, weight: f32) -> Self {
-        // Store as fixed-point integer (0.0-1.0 maps to 0-10000)
-        let weight_int = (weight.clamp(0.0, 1.0) * 10000.0) as u16;
         Self {
             source,
             target,
             kind,
-            weight: Some(weight_int),
+            weight: Some(weight),
+            metadata: None,
         }
-    }
-
-    /// Get the weight as a float (0.0-1.0)
-    pub fn weight_f32(&self) -> Option<f32> {
-        self.weight.map(|w| w as f32 / 10000.0)
     }
 
     /// Create a doc-to-chunk edge
@@ -94,33 +94,43 @@ impl Edge {
     }
 }
 
+impl Eq for Edge {}
+
+impl std::hash::Hash for Edge {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.source.hash(state);
+        self.target.hash(state);
+        self.kind.hash(state);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_edge_creation() {
-        let src = Uuid::new_v4();
-        let tgt = Uuid::new_v4();
+        let src = Uuid::from_bytes([1u8; 16]);
+        let tgt = Uuid::from_bytes([2u8; 16]);
 
         let edge = Edge::doc_to_chunk(src, tgt);
         assert_eq!(edge.source, src);
         assert_eq!(edge.target, tgt);
         assert_eq!(edge.kind, EdgeKind::DocToChunk);
         assert!(edge.weight.is_none());
+        assert!(edge.metadata.is_none());
     }
 
     #[test]
     fn test_weighted_edge() {
         let edge = Edge::with_weight(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
+            Uuid::from_bytes([1u8; 16]),
+            Uuid::from_bytes([2u8; 16]),
             EdgeKind::ChunkToChunk,
             0.85,
         );
 
-        let recovered = edge.weight_f32().unwrap();
-        assert!((recovered - 0.85).abs() < 0.001);
+        assert!((edge.weight.unwrap() - 0.85).abs() < 0.001);
     }
 
     #[test]
@@ -135,5 +145,16 @@ mod tests {
             let value = kind as u8;
             assert_eq!(EdgeKind::from_u8(value), Some(kind));
         }
+    }
+
+    #[test]
+    fn test_edge_with_metadata() {
+        let mut edge = Edge::new(
+            Uuid::from_bytes([1u8; 16]),
+            Uuid::from_bytes([2u8; 16]),
+            EdgeKind::ChunkToChunk,
+        );
+        edge.metadata = Some("related by topic".to_string());
+        assert_eq!(edge.metadata.as_deref(), Some("related by topic"));
     }
 }

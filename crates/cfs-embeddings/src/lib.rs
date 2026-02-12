@@ -13,6 +13,94 @@ use std::path::PathBuf;
 use tokenizers::{PaddingParams, Tokenizer};
 use tracing::info;
 
+/// Model manifest for embedding provenance tracking.
+///
+/// Per CFS-001: Captures cryptographic hashes of all model components
+/// to ensure deterministic and verifiable embedding generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelManifest {
+    /// Human-readable model identifier (e.g., "all-MiniLM-L6-v2")
+    pub model_id: String,
+
+    /// Model version string
+    pub version: String,
+
+    /// BLAKE3 hash of the model weights file
+    pub weights_hash: [u8; 32],
+
+    /// BLAKE3 hash of the tokenizer file
+    pub tokenizer_hash: [u8; 32],
+
+    /// BLAKE3 hash of the config file
+    pub config_hash: [u8; 32],
+
+    /// Combined manifest hash: BLAKE3(weights_hash || tokenizer_hash || config_hash)
+    pub manifest_hash: [u8; 32],
+}
+
+impl ModelManifest {
+    /// Create a new model manifest from component hashes.
+    pub fn new(
+        model_id: String,
+        version: String,
+        weights_hash: [u8; 32],
+        tokenizer_hash: [u8; 32],
+        config_hash: [u8; 32],
+    ) -> Self {
+        // Compute combined manifest hash
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&weights_hash);
+        hasher.update(&tokenizer_hash);
+        hasher.update(&config_hash);
+        let manifest_hash = *hasher.finalize().as_bytes();
+
+        Self {
+            model_id,
+            version,
+            weights_hash,
+            tokenizer_hash,
+            config_hash,
+            manifest_hash,
+        }
+    }
+
+    /// Create manifest from file paths by hashing each file.
+    pub fn from_paths(
+        model_id: String,
+        version: String,
+        weights_path: &std::path::Path,
+        tokenizer_path: &std::path::Path,
+        config_path: &std::path::Path,
+    ) -> Result<Self> {
+        let weights_hash = hash_file(weights_path)?;
+        let tokenizer_hash = hash_file(tokenizer_path)?;
+        let config_hash = hash_file(config_path)?;
+
+        Ok(Self::new(
+            model_id,
+            version,
+            weights_hash,
+            tokenizer_hash,
+            config_hash,
+        ))
+    }
+
+    /// Get the manifest hash as a hex string.
+    pub fn manifest_hash_hex(&self) -> String {
+        self.manifest_hash
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+}
+
+/// Hash a file using BLAKE3.
+fn hash_file(path: &std::path::Path) -> Result<[u8; 32]> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| CfsError::Embedding(format!("Failed to read file for hashing: {}", e)))?;
+    Ok(*blake3::hash(&bytes).as_bytes())
+}
+
 /// Default embedding model from HuggingFace
 const MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
 const MODEL_FILE: &str = "model.safetensors";
@@ -27,8 +115,10 @@ pub struct EmbeddingEngine {
     tokenizer: Tokenizer,
     /// Embedding dimension
     dim: usize,
-    /// Model hash for provenance
+    /// Model hash for provenance (legacy, use manifest instead)
     model_hash: [u8; 32],
+    /// Full model manifest for provenance tracking
+    manifest: ModelManifest,
 }
 
 impl EmbeddingEngine {
@@ -59,10 +149,17 @@ impl EmbeddingEngine {
 
         let device = Device::Cpu;
 
-        // Compute model hash for provenance tracking
-        let model_bytes = std::fs::read(model_path)
-            .map_err(|e| CfsError::Embedding(format!("Failed to read model: {}", e)))?;
-        let model_hash = *blake3::hash(&model_bytes).as_bytes();
+        // Create model manifest for provenance tracking
+        let manifest = ModelManifest::from_paths(
+            MODEL_REPO.to_string(),
+            "1.0.0".to_string(),
+            std::path::Path::new(model_path),
+            std::path::Path::new(tokenizer_path),
+            std::path::Path::new(config_path),
+        )?;
+
+        // Legacy model hash (weights only) for backwards compatibility
+        let model_hash = manifest.weights_hash;
 
         // Load config
         let config_str = std::fs::read_to_string(config_path)
@@ -94,13 +191,14 @@ impl EmbeddingEngine {
         // Get embedding dimension
         let dim = config.hidden_size;
 
-        info!("Loaded embedding model: dim={}", dim);
+        info!("Loaded embedding model: dim={}, manifest={}", dim, manifest.manifest_hash_hex());
 
         Ok(Self {
             model,
             tokenizer,
             dim,
             model_hash,
+            manifest,
         })
     }
 
@@ -162,9 +260,14 @@ impl EmbeddingEngine {
         Ok(())
     }
 
-    /// Get the model hash for provenance tracking
+    /// Get the model hash for provenance tracking (legacy, use manifest() instead)
     pub fn model_hash(&self) -> [u8; 32] {
         self.model_hash
+    }
+
+    /// Get the full model manifest for provenance tracking
+    pub fn manifest(&self) -> &ModelManifest {
+        &self.manifest
     }
 
     /// Embed a single text

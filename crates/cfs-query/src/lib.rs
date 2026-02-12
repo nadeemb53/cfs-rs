@@ -2,7 +2,7 @@
 //!
 //! Provides semantic search and chat over the knowledge graph.
 
-use cfs_core::{Chunk, CfsError, Result};
+use cfs_core::{Chunk, CfsError, Result, ContextAssembler, ScoredChunk, AssembledContext};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
@@ -17,7 +17,7 @@ pub struct SearchResult {
     /// Similarity score (0.0-1.0)
     pub score: f32,
     /// Path to the source document
-    pub doc_path: PathBuf,
+    pub doc_path: String,
 }
 
 /// Result of an LLM generation
@@ -39,7 +39,7 @@ pub struct GenerationResult {
 pub trait IntelligenceEngine: Send + Sync {
     /// Generate a synthesized answer from the provided context and query.
     /// This is a read-only operation and cannot mutate the underlying graph.
-    async fn generate(&self, context: &str, query: &str) -> Result<String>;
+    async fn generate(&self, context: &AssembledContext, query: &str) -> Result<String>;
 }
 
 /// Ollama-based LLM generator (for desktop/server use)
@@ -57,11 +57,13 @@ impl OllamaGenerator {
 
 #[async_trait::async_trait]
 impl IntelligenceEngine for OllamaGenerator {
-    async fn generate(&self, context: &str, query: &str) -> Result<String> {
+    async fn generate(&self, context: &AssembledContext, query: &str) -> Result<String> {
+        let formatted_context = ContextAssembler::format(context);
+        
         // Engineered for consistency with mobile prompt
         let prompt = format!(
             "<|im_start|>system\nYou are a context reading machine. You do not have knowledge of the outside world.\n- Read the Context below carefully.\n- If the answer to the Query is in the Context, output it.\n- If the answer is NOT in the Context, say 'Information is missing from the substrate.' and nothing else.\n- Do not make up facts.\n<|im_end|>\n<|im_start|>user\nContext:\n{}\n\nQuery: {}<|im_end|>\n<|im_start|>assistant\n",
-            context, query
+            formatted_context, query
         );
 
         let client = reqwest::Client::new();
@@ -193,7 +195,7 @@ impl QueryEngine {
             search_results.push(SearchResult {
                 chunk,
                 score: fused_score,
-                doc_path: doc.path,
+                doc_path: doc.path.to_string_lossy().to_string(),
             });
         }
 
@@ -213,7 +215,7 @@ impl QueryEngine {
         Ok(chunks.into_iter().map(|c| SearchResult {
             chunk: c,
             score: 1.0, // Browsing doesn't have a score
-            doc_path: doc.path.clone(),
+            doc_path: doc.path.to_string_lossy().to_string(),
         }).collect())
     }
 
@@ -231,28 +233,33 @@ impl QueryEngine {
         let results = self.search(query, 5)?;
 
         // 2. Assemble context
-        use cfs_core::context_assembler::{ContextAssembler, ScoredChunk};
-        let assembler = ContextAssembler::new(2000); // 2000 approx tokens budget
+        let assembler = ContextAssembler::with_budget(2000); 
         let scored_chunks: Vec<ScoredChunk> = results
             .iter()
             .map(|r| ScoredChunk {
                 chunk: r.chunk.clone(),
                 score: r.score,
+                document_path: r.doc_path.clone(),
             })
             .collect();
 
-        let context = assembler.assemble(scored_chunks);
+        let state_root = {
+            let graph = self.graph.lock().unwrap();
+            graph.compute_merkle_root()?
+        };
+        
+        let assembled_context = assembler.assemble(scored_chunks, query, state_root);
 
         // 3. Generate answer using configured intelligence engine (no fallback)
         let answer = if let Some(ref engine) = self.intelligence {
-            engine.generate(&context, query).await?
+            engine.generate(&assembled_context, query).await?
         } else {
             return Err(CfsError::NotFound("Intelligence engine not configured".into()));
         };
 
         Ok(GenerationResult {
             answer,
-            context,
+            context: ContextAssembler::format(&assembled_context),
             latency_ms: start.elapsed().as_millis() as u64,
         })
     }
@@ -299,9 +306,9 @@ mod tests {
             id: Uuid::new_v4(),
             doc_id: doc.id,
             text: "Hello world".to_string(),
-            offset: 0,
-            len: 11,
-            seq: 0,
+            byte_offset: 0,
+            byte_length: 11,
+            sequence: 0,
             text_hash: [0; 32],
         };
         graph.insert_chunk(&chunk).unwrap();
@@ -327,9 +334,9 @@ mod tests {
             id: Uuid::new_v4(),
             doc_id: doc.id,
             text: "The quick brown fox jumps over the lazy dog".to_string(),
-            offset: 0,
-            len: 43,
-            seq: 0,
+            byte_offset: 0,
+            byte_length: 43,
+            sequence: 0,
             text_hash: [0; 32],
         };
         graph.insert_chunk(&chunk).unwrap();
@@ -372,9 +379,9 @@ mod tests {
                 id: Uuid::new_v4(),
                 doc_id: doc.id,
                 text: text.to_string(),
-                offset: 0,
-                len: text.len() as u32,
-                seq: 0,
+                byte_offset: 0,
+                byte_length: text.len() as u64,
+                sequence: 0,
                 text_hash: [0; 32],
             };
             graph.insert_chunk(&chunk).unwrap();
@@ -449,9 +456,9 @@ mod tests {
                 id: Uuid::new_v4(),
                 doc_id: doc.id,
                 text: content.clone(),
-                offset: 0,
-                len: content.len() as u32,
-                seq: 0,
+                byte_offset: 0,
+                byte_length: content.len() as u64,
+                sequence: 0,
                 text_hash: [0; 32],
             };
             graph.insert_chunk(&chunk).unwrap();

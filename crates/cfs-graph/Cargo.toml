@@ -13,8 +13,10 @@ uuid = { workspace = true }
 
 # Storage
 rusqlite = { workspace = true }
-hnsw_rs = { workspace = true }
-half = { workspace = true }
+
+# Vector search - persistent mmap-backed HNSW
+usearch = "2"
+
 blake3 = { workspace = true }
 
 [dev-dependencies]

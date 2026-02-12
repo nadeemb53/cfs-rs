@@ -1,10 +1,15 @@
 //! State root representing a Merkle commitment to cognitive state
+//!
+//! Per CFS-002 §2.6: Each update to the knowledge graph produces a new state root,
+//! forming a chain of cryptographically verifiable state transitions.
 
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use uuid::Uuid;
 
-/// A state root representing a Merkle commitment to the entire cognitive state
+use crate::hlc::Hlc;
+
+/// A state root representing a Merkle commitment to the entire cognitive state.
 ///
 /// Each update to the knowledge graph produces a new state root, forming
 /// a chain of cryptographically verifiable state transitions.
@@ -16,13 +21,13 @@ pub struct StateRoot {
     /// Hash of the previous state root (None for genesis)
     pub parent: Option<[u8; 32]>,
 
-    /// Unix timestamp when this root was created
-    pub timestamp: i64,
+    /// HLC timestamp when this root was created
+    pub hlc: Hlc,
 
     /// Device ID that produced this state
     pub device_id: Uuid,
 
-    /// Ed25519 signature over (hash || parent || timestamp || device_id)
+    /// Ed25519 signature over (hash || parent || hlc || device_id || seq)
     #[serde(with = "BigArray")]
     pub signature: [u8; 64],
 
@@ -35,30 +40,33 @@ impl StateRoot {
     pub fn new(
         hash: [u8; 32],
         parent: Option<[u8; 32]>,
-        timestamp: i64,
+        hlc: Hlc,
         device_id: Uuid,
         seq: u64,
     ) -> Self {
         Self {
             hash,
             parent,
-            timestamp,
+            hlc,
             device_id,
             signature: [0u8; 64], // Unsigned
             seq,
         }
     }
 
-    /// Get the bytes to be signed
+    /// Get the bytes to be signed.
+    ///
+    /// Layout: hash (32) || parent (32, zeroed if None) || hlc (26) || device_id (16) || seq (8)
+    /// Total: 114 bytes
     pub fn signing_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(32 + 32 + 8 + 16 + 8);
+        let mut bytes = Vec::with_capacity(114);
         bytes.extend_from_slice(&self.hash);
         if let Some(parent) = &self.parent {
             bytes.extend_from_slice(parent);
         } else {
             bytes.extend_from_slice(&[0u8; 32]);
         }
-        bytes.extend_from_slice(&self.timestamp.to_le_bytes());
+        bytes.extend_from_slice(&self.hlc.to_bytes());
         bytes.extend_from_slice(self.device_id.as_bytes());
         bytes.extend_from_slice(&self.seq.to_le_bytes());
         bytes
@@ -84,13 +92,17 @@ impl StateRoot {
 mod tests {
     use super::*;
 
+    fn test_hlc() -> Hlc {
+        Hlc::new(1234567890, [0u8; 16])
+    }
+
     #[test]
     fn test_state_root_creation() {
         let root = StateRoot::new(
             [1u8; 32],
             None,
-            1234567890,
-            Uuid::new_v4(),
+            test_hlc(),
+            Uuid::from_bytes([1u8; 16]),
             0,
         );
 
@@ -100,12 +112,18 @@ mod tests {
 
     #[test]
     fn test_state_chain() {
-        let genesis = StateRoot::new([1u8; 32], None, 1000, Uuid::new_v4(), 0);
+        let genesis = StateRoot::new(
+            [1u8; 32],
+            None,
+            Hlc::new(1000, [0u8; 16]),
+            Uuid::from_bytes([1u8; 16]),
+            0,
+        );
 
         let second = StateRoot::new(
             [2u8; 32],
             Some(genesis.hash),
-            2000,
+            Hlc::new(2000, [0u8; 16]),
             genesis.device_id,
             1,
         );
@@ -120,7 +138,7 @@ mod tests {
         let root = StateRoot::new(
             [42u8; 32],
             Some([1u8; 32]),
-            1234567890,
+            test_hlc(),
             Uuid::from_bytes([0u8; 16]),
             5,
         );
@@ -129,6 +147,29 @@ mod tests {
         let bytes2 = root.signing_bytes();
 
         assert_eq!(bytes1, bytes2);
-        assert_eq!(bytes1.len(), 32 + 32 + 8 + 16 + 8);
+        // hash(32) + parent(32) + hlc(26) + device_id(16) + seq(8) = 114
+        assert_eq!(bytes1.len(), 114);
+    }
+
+    #[test]
+    fn test_signing_bytes_includes_hlc() {
+        let root1 = StateRoot::new(
+            [1u8; 32],
+            None,
+            Hlc::new(1000, [0u8; 16]),
+            Uuid::from_bytes([0u8; 16]),
+            0,
+        );
+
+        let root2 = StateRoot::new(
+            [1u8; 32],
+            None,
+            Hlc::new(2000, [0u8; 16]),
+            Uuid::from_bytes([0u8; 16]),
+            0,
+        );
+
+        // Different HLC → different signing bytes
+        assert_ne!(root1.signing_bytes(), root2.signing_bytes());
     }
 }

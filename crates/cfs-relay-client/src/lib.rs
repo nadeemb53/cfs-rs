@@ -2,16 +2,20 @@
 //!
 //! Provides a strongly-typed client for the minimal relay server.
 //! Handles encryption, serialization, and hex/base64 encoding.
+//!
+//! Per CFS-013: Supports device-addressed routing with proper headers.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use cfs_core::{CfsError, Result, StateRoot};
-use cfs_sync::EncryptedPayload;
+use cfs_sync::{EncryptedPayload, SignedDiff};
 use serde::{Deserialize, Serialize};
 
 /// Client for the CFS relay server
 pub struct RelayClient {
     base_url: String,
-    _auth_token: String,
+    auth_token: String,
+    /// Local device ID for X-Device-ID header
+    device_id: [u8; 16],
     client: reqwest::Client,
 }
 
@@ -35,15 +39,26 @@ struct RootInfo {
 
 impl RelayClient {
     /// Create a new relay client
-    pub fn new(base_url: &str, auth_token: &str) -> Self {
+    pub fn new(base_url: &str, auth_token: &str, device_id: [u8; 16]) -> Self {
         Self {
             base_url: base_url.to_string(),
-            _auth_token: auth_token.to_string(),
+            auth_token: auth_token.to_string(),
+            device_id,
             client: reqwest::Client::new(),
         }
     }
 
-    /// Upload an encrypted diff to the relay
+    /// Create a relay client without device ID (for legacy compatibility)
+    pub fn new_legacy(base_url: &str, auth_token: &str) -> Self {
+        Self::new(base_url, auth_token, [0u8; 16])
+    }
+
+    /// Get device ID as hex string
+    fn device_id_hex(&self) -> String {
+        hex::encode(self.device_id)
+    }
+
+    /// Upload an encrypted diff to the relay (legacy method)
     pub async fn upload_diff(&self, payload: EncryptedPayload, root: &StateRoot) -> Result<()> {
         let url = format!("{}/api/v1/diffs", self.base_url);
 
@@ -58,6 +73,8 @@ impl RelayClient {
         let response = self
             .client
             .post(&url)
+            .header("X-Device-ID", self.device_id_hex())
+            .header("Authorization", format!("Bearer {}", self.auth_token))
             .json(&request)
             .send()
             .await
@@ -66,6 +83,183 @@ impl RelayClient {
         if !response.status().is_success() {
             return Err(CfsError::Sync(format!(
                 "Upload failed with status: {}",
+                response.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Push a signed diff to a specific recipient
+    ///
+    /// Per CFS-013: Uses POST /push with X-Device-ID and X-Recipient-ID headers
+    pub async fn push_diff(&self, signed_diff: &SignedDiff) -> Result<()> {
+        let url = format!("{}/api/v1/push", self.base_url);
+
+        #[derive(Serialize)]
+        struct PushRequest {
+            ciphertext: String,
+            nonce: String,
+            signature: String,
+            public_key: String,
+            outer_signature: String,
+            sender_public_key: String,
+            sequence: u64,
+        }
+
+        let request = PushRequest {
+            ciphertext: BASE64.encode(&signed_diff.encrypted_diff.ciphertext),
+            nonce: hex::encode(signed_diff.encrypted_diff.nonce),
+            signature: hex::encode(signed_diff.encrypted_diff.signature),
+            public_key: hex::encode(signed_diff.encrypted_diff.public_key),
+            outer_signature: hex::encode(signed_diff.signature),
+            sender_public_key: hex::encode(signed_diff.sender_public_key),
+            sequence: signed_diff.sequence,
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("X-Device-ID", hex::encode(signed_diff.sender_device_id))
+            .header("X-Recipient-ID", hex::encode(signed_diff.target_device_id))
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| CfsError::Sync(format!("Failed to push diff: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CfsError::Sync(format!(
+                "Push failed with status: {}",
+                response.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Pull diffs since a given sequence number
+    ///
+    /// Per CFS-013: Uses GET /pull?since=N
+    pub async fn pull_since(&self, since_seq: u64) -> Result<Vec<SignedDiff>> {
+        let url = format!("{}/api/v1/pull?since={}", self.base_url, since_seq);
+
+        let response = self
+            .client
+            .get(&url)
+            .header("X-Device-ID", self.device_id_hex())
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .send()
+            .await
+            .map_err(|e| CfsError::Sync(format!("Failed to pull diffs: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CfsError::Sync(format!(
+                "Pull failed with status: {}",
+                response.status()
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct PullResponse {
+            diffs: Vec<PullDiff>,
+        }
+
+        #[derive(Deserialize)]
+        struct PullDiff {
+            ciphertext: String,
+            nonce: String,
+            signature: String,
+            public_key: String,
+            outer_signature: String,
+            sender_public_key: String,
+            sender_device_id: String,
+            target_device_id: String,
+            sequence: u64,
+        }
+
+        let data: PullResponse = response
+            .json()
+            .await
+            .map_err(|e| CfsError::Sync(format!("Failed to parse pull response: {}", e)))?;
+
+        let mut signed_diffs = Vec::new();
+        for d in data.diffs {
+            let ciphertext = BASE64
+                .decode(&d.ciphertext)
+                .map_err(|e| CfsError::Sync(format!("Invalid base64: {}", e)))?;
+
+            let nonce: [u8; 24] = hex::decode(&d.nonce)
+                .map_err(|e| CfsError::Sync(format!("Invalid nonce hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid nonce length".into()))?;
+
+            let signature: [u8; 64] = hex::decode(&d.signature)
+                .map_err(|e| CfsError::Sync(format!("Invalid signature hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid signature length".into()))?;
+
+            let public_key: [u8; 32] = hex::decode(&d.public_key)
+                .map_err(|e| CfsError::Sync(format!("Invalid public key hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid public key length".into()))?;
+
+            let outer_signature: [u8; 64] = hex::decode(&d.outer_signature)
+                .map_err(|e| CfsError::Sync(format!("Invalid outer signature hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid outer signature length".into()))?;
+
+            let sender_public_key: [u8; 32] = hex::decode(&d.sender_public_key)
+                .map_err(|e| CfsError::Sync(format!("Invalid sender public key hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid sender public key length".into()))?;
+
+            let sender_device_id: [u8; 16] = hex::decode(&d.sender_device_id)
+                .map_err(|e| CfsError::Sync(format!("Invalid sender device ID hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid sender device ID length".into()))?;
+
+            let target_device_id: [u8; 16] = hex::decode(&d.target_device_id)
+                .map_err(|e| CfsError::Sync(format!("Invalid target device ID hex: {}", e)))?
+                .try_into()
+                .map_err(|_| CfsError::Sync("Invalid target device ID length".into()))?;
+
+            signed_diffs.push(SignedDiff {
+                encrypted_diff: EncryptedPayload {
+                    ciphertext,
+                    nonce,
+                    signature,
+                    public_key,
+                },
+                signature: outer_signature,
+                sender_public_key,
+                sender_device_id,
+                target_device_id,
+                sequence: d.sequence,
+            });
+        }
+
+        Ok(signed_diffs)
+    }
+
+    /// Acknowledge receipt of diffs up to a given sequence
+    ///
+    /// Per CFS-013: Uses DELETE /acknowledge with sequence parameter
+    pub async fn acknowledge(&self, sequence: u64) -> Result<()> {
+        let url = format!("{}/api/v1/acknowledge?seq={}", self.base_url, sequence);
+
+        let response = self
+            .client
+            .delete(&url)
+            .header("X-Device-ID", self.device_id_hex())
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .send()
+            .await
+            .map_err(|e| CfsError::Sync(format!("Failed to acknowledge: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CfsError::Sync(format!(
+                "Acknowledge failed with status: {}",
                 response.status()
             )));
         }
