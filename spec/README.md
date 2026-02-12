@@ -106,7 +106,7 @@ Conformant CFS implementations MUST:
 
 1. Produce identical outputs for identical inputs (determinism)
 2. Support all core data types as specified in CFS-001
-3. Implement BLAKE3 hashing and UUIDv5 generation as specified in CFS-002
+3. Implement BLAKE3 hashing as specified in CFS-002
 4. Support hybrid retrieval as specified in CFS-012
 5. Enforce intelligence module constraints as specified in CFS-020
 

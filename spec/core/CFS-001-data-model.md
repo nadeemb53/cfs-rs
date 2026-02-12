@@ -220,7 +220,7 @@ State roots are computed using a BLAKE3 Merkle Tree over all sorted entities.
 3.  **Tree Build**: Leaves are hashed in pairs (BLAKE3) up to a single root.
 4.  **State Composition**: The final State Root hash is `BLAKE3(doc_root || chunk_root || emb_root || edge_root)`.
 
-See `CFS-002` (formerly `CFS-002`, now merged) logic for precise node construction.
+See `CFS-002` logic for precise node construction.
 
 #### State Chain
 
