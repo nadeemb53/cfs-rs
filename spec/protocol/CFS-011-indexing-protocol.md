@@ -35,7 +35,7 @@ Effective indexing is critical for:
                                                           │(Sorted List)
                                                           │            │
                                                           │ 2. Cache   │
-                                                          │  (HNSW)    │
+                                                          │ (Disk Based)
                                                           └────────────┘
 ```
 
@@ -258,7 +258,7 @@ function create_document(path: String, content: bytes) -> Document:
     content_hash = BLAKE3(content)
 
     // 2. Generate document ID
-    doc_id = UUIDv5(DOCUMENT_NAMESPACE, content_hash)
+    doc_id = generate_id(content_hash)
 
     // 3. Detect MIME type
     mime_type = detect_file_type(path)
@@ -290,8 +290,12 @@ function create_chunks(doc: Document, chunk_data: Vec<ChunkData>) -> Vec<Chunk>:
         // 1. Compute text hash
         text_hash = BLAKE3(data.text.as_bytes())
 
-        // 2. Generate chunk ID
-        chunk_id = UUIDv5(CHUNK_NAMESPACE, text_hash)
+        // 2. Generate chunk ID (Composite)
+        chunk_id = generate_id(
+            doc.id + 
+            data.sequence.to_le_bytes() + 
+            data.text.as_bytes()
+        )
 
         // 3. Create chunk
         chunks.push(Chunk {
@@ -443,32 +447,34 @@ function watch_directory(path: String, graph: GraphStore):
 
 ### 11. Runtime Index Management
 
-The **Runtime Index** (HNSW) is a transient performance cache. It is **NOT** part of the canonical state.
+The **Runtime Index** (HNSW) is a persistent performance cache backed by disk (e.g., Memory-Mapped File or DiskANN).
 
 #### Properties
 
 | Property | Canonical State | Runtime Index |
 |----------|-----------------|---------------|
-| Structure | Sorted List (B-Tree) | Graph (HNSW) |
-| Durability | Persistent (Event Log) | Ephemeral (Cache) |
+| Structure | Sorted List (B-Tree) | Graph (HNSW/DiskANN) |
+| Durability | Persistent (Event Log) | Persistent Cache (Rebuildable) |
 | Determinism | Strict (Bit-Exact) | Loose (Graph construction varies) |
 | Usage | Verification & Sync | Fast Retrieval |
 
-#### Reconstruction
+#### Cache Invalidation Strategy
 
-The Runtime Index can be deleted and rebuilt from the Canonical State at any time:
+On startup, the system checks if the cached index needs rebuilding:
 
 ```
-function rebuild_runtime_index(graph: GraphStore):
-    // 1. Clear existing HNSW
-    graph.hnsw.clear()
+function load_runtime_index(graph: GraphStore):
+    // 1. Get current canonical root
+    current_root = graph.get_latest_state_root()
 
-    // 2. Load all canonical embeddings (sorted)
-    embeddings = graph.get_all_embeddings_sorted()
-
-    // 3. Batch insert into HNSW
-    // Note: Insertion order affects graph structure but NOT search correctness
-    graph.hnsw.build(embeddings)
+    // 2. Check index metadata
+    if index_checksum(graph.index_path) == current_root:
+        // Cache is valid - map it
+        graph.hnsw.mmap_load()
+    else:
+        // Cache is state - rebuild in background
+        graph.hnsw.delete()
+        spawn_background_worker(rebuild_runtime_index)
 ```
 
 ## Desired Properties

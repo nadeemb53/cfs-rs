@@ -87,7 +87,7 @@ Each device has a unique identity:
 
 ```
 struct DeviceIdentity {
-    device_id: UUID,              // UUIDv5 from public key
+    device_id: ID,                // generate_id(public_key)
     public_key: [u8; 32],         // Ed25519 public key
     private_key: [u8; 64],        // Ed25519 private key (local only)
 }
@@ -97,7 +97,7 @@ function generate_device_identity() -> DeviceIdentity:
     (public_key, private_key) = ed25519_keygen()
 
     // 2. Derive device ID from public key
-    device_id = UUIDv5(DEVICE_NAMESPACE, public_key)
+    device_id = generate_id(public_key)
 
     return DeviceIdentity { device_id, public_key, private_key }
 ```
@@ -472,11 +472,20 @@ function pair_devices(device_a: DeviceIdentity, device_b: DeviceIdentity) -> Sha
 
 CFS V1 uses a simple conflict resolution strategy:
 
-#### Write-Once Semantics
+#### Write-Once Semantics (V1 Constraint)
 
-- Desktop is the sole writer
-- Mobile is read-only
-- No conflicts possible
+**Constraint**: V1 strictly enforces a **Single-Writer / Multi-Reader** topology.
+
+- **Writer**: Only ONE device (e.g., Desktop) is authorized to create/edit content.
+- **Readers**: All other devices (e.g., Mobile) are Read-Only replicas.
+- **Enforcement**:
+    - Readers MUST reject local writes (UI should be read-only).
+    - Relay server MAY reject pushes from non-writer devices (if configured).
+
+**Rationale**:
+- Simplifies V1 by eliminating conflict resolution logic.
+- Avoids complexity of CRDTs or Vector Clocks in the initial release.
+- Matches the primary use case: "Curate on Desktop, Consume on Mobile".
 
 #### Future: Multi-Writer Conflict Resolution
 

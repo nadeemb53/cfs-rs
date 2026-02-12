@@ -73,7 +73,9 @@ model_hash = BLAKE3(model_id.to_lowercase())
 
 ### 3. Tokenization
 
-#### Algorithm
+#### Algorithm (WASM Encapsulated)
+
+The tokenization logic MUST be compiled into the Canonical WASM Blob. Host-native tokenizers (e.g., Python `tokenizers` or Rust `tokenizers` crate linked dynamically) are strictly forbidden for the Canonical Path.
 
 ```
 function tokenize(text: String) -> TokenIds:
@@ -129,21 +131,23 @@ function forward(token_ids: Vec<i64>, attention_mask: Vec<i64>) -> Vec<Vec<f32>>
     return hidden  // Shape: [seq_len, hidden_size]
 ```
 
-### 6. Inference Modes
+### 6. Inference Modes (Optimistic Concurrency)
 
-CFS defines two inference modes to balance verification with user experience:
+CFS employs an **Optimistic Concurrency** model to balance local performance with global correctness.
 
-1.  **Canonical Inference (WASM/SoftFloat)**:
-    -   **MUST** be used for generating embeddings that enter the **Canonical State** (Merkle Tree).
-    -   Executes in a WASM sandbox or using a bit-exact SoftFloat kernel.
-    -   Guarantees bit-for-bit reproducibility across all architectures (x86, ARM, RISC-V).
-    -   **Slower** but verifiable.
+1.  **Fast Path (Local/Interactive)**:
+    -   **Usage**: Local search, UI feedback, "chat with your data".
+    -   **Execution**: Hardware Accelerated (Metal, CUDA, NPU).
+    -   **Semantics**: "Tentative". Embeddings are used for local transient indices but **NEVER** synced.
+    -   **Latency**: < 50ms per chunk.
 
-2.  **Fast Inference (Hardware Accelerated)**:
-    -   **MAY** be used for transient operations like local chat responses or UI feedback.
-    -   Uses GPU/NPU/AMX for speed.
-    -   **NOT** used for state generation/hashing.
-    -   **Faster** but potentially non-deterministic across devices.
+2.  **Canonical Path (Background/Sync)**:
+    -   **Usage**: State generation, Merkle tree construction, Synchronization.
+    -   **Execution**: **WASM Sandbox** with SoftFloat.
+    -   **Semantics**: "Final". Replaces tentative embeddings in the background.
+    -   **Latency**: > 1000ms per chunk.
+
+**Constraint**: The Canonical Path MUST encapsulate the **entire pipeline** (Tokenizer + Model + Post-processing) within the WASM blob to ensure bit-exactness. Relying on host-side tokenizers is PROHIBITED.
 
 ### 7. Pooling Strategy
 
@@ -259,8 +263,7 @@ function generate_canonical_embedding(chunk: Chunk, model: EmbeddingModel) -> Ca
     embedding_hash = BLAKE3(vector_i16.to_le_bytes())
 
     // 7. Create embedding
-    embedding_id = UUIDv5(
-        EMBEDDING_NAMESPACE,
+    embedding_id = generate_id(
         chunk.id.to_bytes() || model.hash
     )
 
