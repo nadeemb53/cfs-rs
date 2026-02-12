@@ -90,23 +90,25 @@ function canonicalize_text(text: String) -> CanonicalText:
 ```
 
 **Guarantees**:
-- Identical semantic content → identical bytes
-- Hash is computed over canonical bytes
-- No platform-dependent encoding
+-   Identical semantic content → identical bytes
+-   Hash is computed over canonical bytes
+-   No platform-dependent encoding
 
-#### 2.2 Strict Integer/SoftFloat Representation
+#### 2.2 Numerical Representation (Guidance)
 
-CFS operates on a strictly **integer-only substrate** or requires **Software-Defined Floating Point (SoftFloat)**. Hardware floating-point units (FPU) are **PROHIBITED** for any state-affecting calculation due to IEEE 754 inconsistencies across architectures (x86 EXTended precision, ARM NEON flushing behaviors, FMA differences).
+While CFS strongly recommends **Integer-only** or **SoftFloat** arithmetic for maximum auditability, this is **NOT** a protocol requirement for V1.
 
-**Fixed-Point Schema**:
-- **Embeddings**: `i16` (Range: -32768 to 32767) representing values in `[-1.0, 1.0]`
-- **Scores**: `i32` scaled by `1,000,000` (6 decimal precision)
-- **Probabilities**: `u32` scaled by `1,000,000` (Range: 0 to 1,000,000)
+**Reasoning**:
+-   **Performance**: Strict SoftFloat for every calculation (e.g., BM25, Cosine Sim) is prohibitively slow on mobile.
+-   **Pragmatism**: Minor floating-point drift in search ranking is acceptable for user applications, provided it does not corrupt the **State Root**.
 
-**Normalization Rule**:
-Normalization MUST NOT use hardware `sqrt` or division. It MUST use:
-1.  **SoftFloat Library**: A bit-exact software emulation of IEEE 754 (e.g., `berkeley-softfloat`, `rust-softfloat`).
-2.  **OR Integer-Scaled Math**: Newton-Raphson integer square root with fixed scaling.
+**Canonical Data Requirement**:
+-   **Embeddings**: MUST be stored as `i16` (Quantized).
+-   **State Root**: MUST be derived from the quantized integer values, NOT from transient floating-point calculations.
+
+**Implementation Recommendation**:
+-   Use hardware floats for query ranking and UI.
+-   Use integer/quantized math only for **Merkle Tree Construction** and **Sync verification**.
 
 **Robust Quantization**:
 To handle model output jitter (e.g., `0.5000001` vs `0.4999999`), we employ a "Dead-Zone" optimization before committing to the canonical state.
@@ -225,14 +227,15 @@ This ensures all devices download **exactly the same bytes**.
 Embeddings are uniquely identified by their inputs:
 
 ```
+```
 function compute_embedding_id(
     text_hash: [u8; 32],
     model_manifest_hash: [u8; 32],
     embedding_version: u32
-) -> UUID:
-    // Embedding ID = hash of (text, model, version)
+) -> ID:
+    // Embedding ID = first 16 bytes of BLAKE3(text || model || version)
     input = text_hash || model_manifest_hash || embedding_version.to_le_bytes()
-    return UUIDv5(EMBEDDING_NAMESPACE, BLAKE3(input))
+    return generate_id(input)
 ```
 
 **Key Property**: If two devices compute embeddings for the same text with the same model, they MUST get the same embedding ID.
@@ -264,20 +267,6 @@ function deterministic_tokenize(text: CanonicalText, tokenizer: Tokenizer) -> To
     }
 ```
 
-#### 4.2 Canonical vs. Fast Inference
-
-We acknowledge two modes of inference with distinct guarantees.
-
-**Mode A: Canonical Inference (Verification & Publishing)**
-To produce embeddings that enter the **OpsLog** and **Merkle Tree**, inference MUST be bit-exact.
-- **Requirement**: MUST run on **WASM (WebAssembly)** or a **Software-Defined float/integer kernel**.
-- **Hardware Acceleration**: DISALLOWED (No AVX, No NEON, No Metal/CUDA) unless strict bit-exactness is proven (which is rarely possible).
-- **Use Case**: Indexing new content, verifying remote ops.
-- **Performance**: Slower (10-50x), but correct.
-
-**Mode B: Fast Inference (Local User Experience)**
-To generate chat responses or ephemeral search queries.
-- **Requirement**: None. Use Metal, CUDA, CoreML.
 - **Hardware Acceleration**: ALLOWED.
 - **Use Case**: Chatting with the bot, local-only search queries.
 - **Constraint**: These outputs **NEVER** enter the Merkle tree directly.
@@ -356,19 +345,19 @@ function deterministic_similarity(a: CanonicalEmbedding, b: CanonicalEmbedding) 
 
 **Note**: Since embeddings are `i16` (max 32767), the dot product of two vectors of dimension `d` can reach `32767 * 32767 * d`. For `d=768` (BERT), this is `~8.2 * 10^11`, which fits comfortably in `i64` (max `9 * 10^18`).
 
-#### 5.2 Transient Indexing (HNSW)
+### 5.2 Persistent Transient Indices (HNSW)
 
-**CRITICAL ARCHITECTURAL CHANGE**: The HNSW Graph is **NOT** part of the canonical state.
+The HNSW graph is a **probabilistic** data structure. Its exact topology depends on insertion order and random seed, making it unsuitable for canonical hashing.
 
-**Rationale**: HNSW construction is inherently sensitive to insertion order and random seed. While "Deterministic HNSW" is possible, it is fragile and expensive to verify (you must rebuild the whole graph from scratch to verify the root).
+**Architecture**:
+1.  **Canonical State**: A sorted, Merkle-verified list of embeddings (the "Ground Truth").
+2.  **Indexing Strategy**: devices maintain a local **Persistent Transient Index** (e.g., DiskANN or memory-mapped HNSW).
+3.  **Persistence**: The index is stored on disk to avoid expensive rebuilds on startup.
+4.  **Validation**: On initialization, the index's validity is checked against the canonical state root.
+    -   `if index.checkpoint_root == state.current_root`: Load index (fast).
+    -   `else`: Rebuild index in background (correctness).
 
-**New Design**:
-1.  **Canonical State**: A **Flat, Sorted List** of embeddings.
-    -   `Vec<(EmbeddingId, Vector)>`
-    -   Sorted by `EmbeddingId`.
-    -   Merkle Tree hashes this list.
-2.  **Runtime Index**: An HNSW index (or other ANN index) built *locally* from the canonical list.
-
+**Constraint**: The HNSW graph itself is NEVER synced. Only the semantic content (embeddings) is synced.
 ```rust
 struct CanonicalState {
     // The SOURCE OF TRUTH
@@ -428,40 +417,17 @@ function deterministic_search(
 
 FTS ranking MUST be deterministic across SQLite versions.
 
-#### 6.1 Integer BM25
+#### 6.1 Integer BM25 (Guidance)
 
-BM25 ranking MUST use fixed-point arithmetic.
+Implementations SHOULD use integer-based math for BM25 where possible to ensure consistent ranking across devices, but this is an implementation detail, not a protocol constraint.
+
+The following reference implementation demonstrates a fixed-point approach:
 
 ```
-function integer_bm25(
-    term_freq: u32,
-    doc_len: u32,
-    avg_doc_len_scaled: u32, // scaled by 1000
-    doc_freq: u32,
-    total_docs: u32
-) -> i32: // Scaled by 1,000,000
-    k1 = 1200    // 1.2 * 1000
-    b = 750      // 0.75 * 1000
-    
-    // IDF: uses integer log approximation
-    // idf(q) = log((N - n + 0.5) / (n + 0.5) + 1)
-    idf_num = (total_docs - doc_freq) * 1000 + 500
-    idf_denom = doc_freq * 1000 + 500
-    idf_val = integer_log(idf_num * 1000 / idf_denom) // returns scaled log
-    
-    // TF component
-    // tf = ((k1 + 1) * freq) / (k1 * (1 - b + b * L/avgL) + freq)
-    num = term_freq * (k1 + 1000)
-    
-    // Denom calculation in fixed point
-    len_ratio = (doc_len * 1000) / avg_doc_len_scaled
-    b_part = (b * len_ratio) / 1000
-    k_part = (k1 * (1000 - b + b_part)) / 1000
-    denom = k_part + term_freq * 1000
-    
-    tf_val = (num * 1000) / denom
-    
-    return (idf_val * tf_val) / 1000
+// Reference Logic (Not Normative)
+function integer_bm25(...) -> i32 {
+    // ... logic ...
+}
 ```
 
 #### 6.2 Deterministic FTS Index

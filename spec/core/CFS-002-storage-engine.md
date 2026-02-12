@@ -33,10 +33,10 @@ The hybrid SQLite + HNSW architecture achieves all these goals.
 │  ┌─────────────────────────┐   ┌─────────────────────────┐  │
 │  │       SQLite DB         │   │      HNSW Index         │  │
 │  ├─────────────────────────┤   ├─────────────────────────┤  │
-│  │ - documents             │   │ - In-memory graph       │  │
+│  │ - documents             │   │ - Disk-based (Mmap)     │  │
 │  │ - chunks                │   │ - Vector similarity     │  │
-│  │ - embeddings            │   │ - Rebuilt on startup    │  │
-│  │ - edges                 │   │ - Persisted via SQLite  │  │
+│  │ - embeddings            │   │ - Persisted independently│ │
+│  │ - edges                 │   │ - Validated via Merkle  │  │
 │  │ - state_roots           │   │                         │  │
 │  │ - fts_chunks (FTS5)     │   │                         │  │
 │  └─────────────────────────┘   └─────────────────────────┘  │
@@ -50,7 +50,7 @@ The hybrid SQLite + HNSW architecture achieves all these goals.
 
 ```sql
 CREATE TABLE documents (
-    id              BLOB PRIMARY KEY,     -- UUID as 16 bytes
+    id              BLOB PRIMARY KEY,     -- 16 bytes (BLAKE3-16)
     path            TEXT NOT NULL,
     content_hash    BLOB NOT NULL,        -- BLAKE3 hash (32 bytes)
     hierarchical_hash BLOB NOT NULL,      -- Merkle root of chunks
@@ -69,7 +69,7 @@ CREATE INDEX idx_documents_content_hash ON documents(content_hash);
 
 ```sql
 CREATE TABLE chunks (
-    id              BLOB PRIMARY KEY,     -- UUID as 16 bytes
+    id              BLOB PRIMARY KEY,     -- 16 bytes (BLAKE3-16)
     document_id     BLOB NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     text            TEXT NOT NULL,
     text_hash       BLOB NOT NULL,        -- BLAKE3 hash (32 bytes)
@@ -89,7 +89,7 @@ CREATE INDEX idx_chunks_text_hash ON chunks(text_hash);
 
 ```sql
 CREATE TABLE embeddings (
-    id              BLOB PRIMARY KEY,     -- UUID as 16 bytes
+    id              BLOB PRIMARY KEY,     -- 16 bytes (BLAKE3-16)
     chunk_id        BLOB NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     vector          BLOB NOT NULL,        -- i16 array, serialized
     model_hash      BLOB NOT NULL,        -- BLAKE3 hash (32 bytes)
@@ -106,9 +106,9 @@ CREATE INDEX idx_embeddings_model_hash ON embeddings(model_hash);
 
 ```sql
 CREATE TABLE edges (
-    source_id       BLOB NOT NULL,
-    target_id       BLOB NOT NULL,
-    kind            TEXT NOT NULL,        -- Edge type enum as string
+    source_id       BLOB NOT NULL,        -- 16 bytes (BLAKE3-16)
+    target_id       BLOB NOT NULL,        -- 16 bytes (BLAKE3-16)
+    kind            TEXT NOT NULL,        -- "DocToChunk", "ChunkToEmbedding"
     weight          REAL,                 -- Optional relationship strength
     created_at      INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
 
@@ -127,7 +127,7 @@ CREATE TABLE state_roots (
     hash            BLOB NOT NULL UNIQUE, -- BLAKE3 Merkle root
     parent_hash     BLOB,                 -- Previous state root
     timestamp       INTEGER NOT NULL,     -- Unix timestamp (ms)
-    device_id       BLOB NOT NULL,        -- Originating device UUID
+    device_id       BLOB NOT NULL,        -- 16 bytes (BLAKE3-16)
     signature       BLOB NOT NULL,        -- Ed25519 signature (64 bytes)
     created_at      INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
@@ -176,26 +176,25 @@ END;
 
 #### Initialization
 
+#### Disk-Based Persistence
+
+To avoid OOM errors on mobile and expensive rebuilds, the HNSW index MUST be backed by disk (e.g., Memory-Mapped Files or DiskANN).
+
 ```
-function init_hnsw_index(embeddings: Vec<Embedding>) -> HNSWIndex:
-    // 1. Create empty index
-    index = HNSWIndex::new(
-        dim = embeddings[0].dimension,
-        max_elements = max(100_000, embeddings.len() * 2),
-        M = 16,
-        ef_construction = 200
-    )
+function load_or_build_index(embeddings: Vec<Embedding>, state_root: Hash) -> HNSWIndex:
+    // 1. Check if on-disk index exists and is valid
+    if fs::exists("index.bin") and fs::exists("index.meta"):
+        meta = read_meta("index.meta")
+        if meta.checkpoint_root == state_root:
+             // Fast Path: Map file into memory (zero-copy)
+             return HNSWIndex::mmap("index.bin")
 
-    // 2. Add all embeddings
-    for embedding in embeddings:
-        vector = deserialize_vector(embedding.vector)
-        index.add(embedding.id, vector)
-
-    // 3. Set search parameters
-    index.set_ef(50)
-
-    return index
+    // 2. Slow Path: Rebuild from source
+    // Run in background to avoid blocking UI
+    return rebuild_index_background(embeddings, state_root)
 ```
+
+**Constraint**: The index is a **cache**. If it is corrupted or outdated, it is deleted and rebuilt from the SQLite source of truth.
 
 #### Vector Serialization
 
@@ -324,17 +323,15 @@ function ingest_document(path: String, content: bytes) -> Result<()>:
 The HNSW index is rebuilt on startup from SQLite data:
 
 ```
-function open_graph_store(db_path: String) -> GraphStore:
+function open_graph_store(db_path: String, index_path: String) -> GraphStore:
     // 1. Open SQLite database
     db = SQLite::open(db_path)
+    current_root = db.get_latest_state_root()
 
-    // 2. Load all embeddings
-    embeddings = db.query("SELECT * FROM embeddings")
+    // 2. Try to load persistent index
+    hnsw = load_or_build_index(db, index_path, current_root)
 
-    // 3. Build HNSW index
-    hnsw = init_hnsw_index(embeddings)
-
-    // 4. Return initialized store
+    // 3. Return initialized store
     return GraphStore { db, hnsw }
 ```
 
