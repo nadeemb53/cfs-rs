@@ -1,0 +1,18 @@
+[package]
+name = "cp-relay-client"
+description = "HTTP client for CP relay server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+cp-sync = { path = "../cp-sync" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }

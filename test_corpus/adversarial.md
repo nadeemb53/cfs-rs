@@ -1,8 +1,8 @@
 # Adversarial Test Corpus
 
 ## API Reference
-The `CognitiveFilesystem` (CFS) provides a local-first semantic substrate.
-Users can interact with the system via the `cfs-mobile` FFI or the `cfs-desktop` library.
+The `CognitiveFilesystem` (CP) provides a local-first semantic substrate.
+Users can interact with the system via the `cp-mobile` FFI or the `cp-desktop` library.
 
 ### Authentication
 Phase 1 does not include authentication. However, Phase 2 implements encrypted sync using a shared seed.

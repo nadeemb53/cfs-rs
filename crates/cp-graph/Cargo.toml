@@ -1,0 +1,23 @@
+[package]
+name = "cp-graph"
+description = "Knowledge graph and vector store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+# Storage
+rusqlite = { workspace = true }
+
+# Vector search - persistent mmap-backed HNSW
+usearch = "2"
+
+blake3 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

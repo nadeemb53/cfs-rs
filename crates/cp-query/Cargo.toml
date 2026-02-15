@@ -1,0 +1,28 @@
+[package]
+name = "cp-query"
+description = "RAG query engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+cp-graph = { path = "../cp-graph" }
+cp-embeddings = { path = "../cp-embeddings" }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+hex = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+blake3 = { workspace = true }
+
+# Caching and filtering
+lru = "0.12"
+glob = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }

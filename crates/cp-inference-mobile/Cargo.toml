@@ -1,0 +1,16 @@
+[package]
+name = "cp-inference-mobile"
+description = "Local LLM inference for CP mobile (llama.cpp based)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+cp-query = { path = "../cp-query" }
+llama-cpp-2 = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }

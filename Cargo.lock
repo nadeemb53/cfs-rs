@@ -586,253 +586,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
-name = "cfs-canonical-embeddings"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "safetensors 0.7.0",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "unicode-normalization",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "cfs-core"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "serde",
- "serde-big-array",
- "serde_json",
- "thiserror 2.0.18",
- "unicode-normalization",
- "uuid",
-]
-
-[[package]]
-name = "cfs-desktop"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "cfs-core",
- "cfs-embeddings",
- "cfs-graph",
- "cfs-parser",
- "cfs-query",
- "cfs-relay-client",
- "cfs-sync",
- "dirs",
- "hex",
- "mime_guess",
- "notify",
- "rand 0.8.5",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cfs-desktop-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cfs-core",
- "cfs-desktop",
- "cfs-embeddings",
- "cfs-query",
- "clap",
- "path-clean",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cfs-embeddings"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "cfs-core",
- "dirs",
- "ndarray",
- "serde_json",
- "thiserror 2.0.18",
- "tokenizers",
- "tracing",
- "ureq",
-]
-
-[[package]]
-name = "cfs-graph"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "cfs-core",
- "rusqlite",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
- "usearch",
- "uuid",
-]
-
-[[package]]
-name = "cfs-inference-mobile"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cfs-core",
- "cfs-query",
- "llama-cpp-2",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cfs-mobile"
-version = "0.1.0"
-dependencies = [
- "cfs-core",
- "cfs-embeddings",
- "cfs-graph",
- "cfs-inference-mobile",
- "cfs-query",
- "cfs-relay-client",
- "cfs-sync",
- "hex",
- "llama-cpp-2",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cfs-parser"
-version = "0.1.0"
-dependencies = [
- "cfs-core",
- "pdf-extract",
- "pulldown-cmark",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cfs-query"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "cfs-core",
- "cfs-embeddings",
- "cfs-graph",
- "glob",
- "hex",
- "lru",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cfs-relay-client"
-version = "0.1.0"
-dependencies = [
- "base64 0.21.7",
- "cfs-core",
- "cfs-sync",
- "hex",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cfs-relay-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "cfs-core",
- "http-body-util",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cfs-sync"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "cfs-core",
- "chacha20poly1305",
- "ciborium",
- "ed25519-dalek",
- "hex",
- "hkdf",
- "rand 0.8.5",
- "serde",
- "serde-big-array",
- "sha2",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
- "x25519-dalek",
- "zstd",
-]
-
-[[package]]
-name = "cfs-tests"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "blake3",
- "cfs-core",
- "cfs-desktop",
- "cfs-embeddings",
- "cfs-graph",
- "cfs-query",
- "cfs-sync",
- "hex",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "chacha20"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1098,6 +851,253 @@ dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
  "libc",
+]
+
+[[package]]
+name = "cp-canonical-embeddings"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "safetensors 0.7.0",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "unicode-normalization",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "cp-core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde-big-array",
+ "serde_json",
+ "thiserror 2.0.18",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
+name = "cp-desktop"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "cp-core",
+ "cp-embeddings",
+ "cp-graph",
+ "cp-parser",
+ "cp-query",
+ "cp-relay-client",
+ "cp-sync",
+ "dirs",
+ "hex",
+ "mime_guess",
+ "notify",
+ "rand 0.8.5",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "cp-desktop-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cp-core",
+ "cp-desktop",
+ "cp-embeddings",
+ "cp-query",
+ "path-clean",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "cp-embeddings"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "cp-core",
+ "dirs",
+ "ndarray",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokenizers",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
+name = "cp-graph"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "cp-core",
+ "rusqlite",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "usearch",
+ "uuid",
+]
+
+[[package]]
+name = "cp-inference-mobile"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cp-core",
+ "cp-query",
+ "llama-cpp-2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "cp-mobile"
+version = "0.1.0"
+dependencies = [
+ "cp-core",
+ "cp-embeddings",
+ "cp-graph",
+ "cp-inference-mobile",
+ "cp-query",
+ "cp-relay-client",
+ "cp-sync",
+ "hex",
+ "llama-cpp-2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "cp-parser"
+version = "0.1.0"
+dependencies = [
+ "cp-core",
+ "pdf-extract",
+ "pulldown-cmark",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "cp-query"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "cp-core",
+ "cp-embeddings",
+ "cp-graph",
+ "glob",
+ "hex",
+ "lru",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "cp-relay-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.21.7",
+ "cp-core",
+ "cp-sync",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "cp-relay-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "cp-core",
+ "http-body-util",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "cp-sync"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "chacha20poly1305",
+ "ciborium",
+ "cp-core",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "rand 0.8.5",
+ "serde",
+ "serde-big-array",
+ "sha2",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "x25519-dalek",
+ "zstd",
+]
+
+[[package]]
+name = "cp-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "cp-core",
+ "cp-desktop",
+ "cp-embeddings",
+ "cp-graph",
+ "cp-query",
+ "cp-sync",
+ "hex",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -3326,12 +3326,12 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 name = "macos-app"
 version = "0.1.0"
 dependencies = [
- "cfs-core",
- "cfs-desktop",
- "cfs-embeddings",
- "cfs-query",
- "cfs-relay-client",
- "cfs-sync",
+ "cp-core",
+ "cp-desktop",
+ "cp-embeddings",
+ "cp-query",
+ "cp-relay-client",
+ "cp-sync",
  "hex",
  "path-clean",
  "serde",

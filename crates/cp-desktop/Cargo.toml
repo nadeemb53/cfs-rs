@@ -1,0 +1,31 @@
+[package]
+name = "cp-desktop"
+description = "Tauri desktop application for Canon Protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Desktop app is a binary, not compiled with workspace by default
+# Will be set up with Tauri in a later phase
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+cp-parser = { path = "../cp-parser" }
+rand = "0.8"
+blake3 = "1.5"
+cp-embeddings = { path = "../cp-embeddings" }
+cp-graph = { path = "../cp-graph" }
+cp-sync = { path = "../cp-sync" }
+cp-relay-client = { path = "../cp-relay-client" }
+cp-query = { path = "../cp-query" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+notify = "6.1.1"
+mime_guess = "2.0.4"
+uuid = { workspace = true }
+dirs = "5.0.1"
+hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

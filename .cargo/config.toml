@@ -1,4 +1,4 @@
-# Cargo configuration for CFS
+# Cargo configuration for CP
 
 # For iOS simulator builds, we need to help cmake find things
 # Note: Metal is auto-detected and we can't easily disable it via env vars

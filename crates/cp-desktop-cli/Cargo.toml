@@ -1,0 +1,18 @@
+[package]
+name = "cp-desktop-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+cp-desktop = { path = "../cp-desktop" }
+cp-query = { path = "../cp-query" }
+cp-embeddings = { path = "../cp-embeddings" }
+clap = { version = "4.4", features = ["derive"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+path-clean = "1.0"

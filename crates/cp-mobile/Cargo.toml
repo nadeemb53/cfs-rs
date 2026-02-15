@@ -1,0 +1,27 @@
+[package]
+name = "cp-mobile"
+description = "Mobile-optimized CP core with C FFI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+cp-graph = { path = "../cp-graph" }
+cp-sync = { path = "../cp-sync" }
+cp-relay-client = { path = "../cp-relay-client" }
+cp-query = { path = "../cp-query" }
+cp-embeddings = { path = "../cp-embeddings" }
+cp-inference-mobile = { path = "../cp-inference-mobile" }
+llama-cpp-2 = { workspace = true }
+hex = "0.4"
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true }

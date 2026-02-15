@@ -1,29 +1,29 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/cfs-core",
-    "crates/cfs-parser",
-    "crates/cfs-embeddings",
-    "crates/cfs-graph",
-    "crates/cfs-sync",
-    "crates/cfs-relay-client",
-    "crates/cfs-query",
-    "crates/cfs-desktop",
-    "crates/cfs-mobile",
-    "crates/cfs-tests",
-    "crates/cfs-desktop-cli",
-    "crates/cfs-canonical-embeddings",
-    "crates/cfs-inference-mobile",
-    "apps/macos/src-tauri",
-    "relay/cfs-relay-server",
+    "crates/cp-core",
+    "crates/cp-parser",
+    "crates/cp-embeddings",
+    "crates/cp-graph",
+    "crates/cp-sync",
+    "crates/cp-relay-client",
+    "crates/cp-query",
+    "crates/cp-desktop",
+    "crates/cp-mobile",
+    "crates/cp-tests",
+    "crates/cp-desktop-cli",
+    "crates/cp-canonical-embeddings",
+    "crates/cp-inference-mobile",
+    "examples/macos/src-tauri",
+    "relay/cp-relay-server",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["CFS Contributors"]
-repository = "https://github.com/nadeemb53/csf-rs"
+authors = ["Canon Protocol Contributors"]
+repository = "https://github.com/nadeemb53/canon-protocol"
 
 [workspace.dependencies]
 # Async runtime

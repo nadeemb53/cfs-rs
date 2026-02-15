@@ -14,7 +14,7 @@
 Thumbs.db
 
 # Local data
-/.cfs/
+/.cp/
 *.db
 *.sqlite
 *.sqlite3
@@ -27,9 +27,9 @@ Thumbs.db
 *.gguf
 
 # Mobile build artifacts (new paths)
-apps/ios/CFSMobile/libcfs_mobile.a
-apps/ios/CFSMobile.xcodeproj/project.xcworkspace/
-apps/ios/CFSMobile.xcodeproj/xcuserdata/
+apps/ios/CPMobile/libcp_mobile.a
+apps/ios/CPMobile.xcodeproj/project.xcworkspace/
+apps/ios/CPMobile.xcodeproj/xcuserdata/
 
 # General binary libraries
 *.a

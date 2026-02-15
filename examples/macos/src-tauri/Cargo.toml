@@ -1,0 +1,23 @@
+[package]
+name = "macos-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tauri = { version = "1.5", features = [ "dialog-message", "dialog", "dialog-open", "protocol-asset"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+tokio = { workspace = true }
+cp-core = { path = "../../../crates/cp-core" }
+cp-desktop = { path = "../../../crates/cp-desktop" }
+cp-query = { path = "../../../crates/cp-query" }
+cp-embeddings = { path = "../../../crates/cp-embeddings" }
+tracing = { workspace = true }
+uuid = { workspace = true }
+cp-sync = { path = "../../../crates/cp-sync" }
+cp-relay-client = { path = "../../../crates/cp-relay-client" }
+path-clean = "1.0"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
