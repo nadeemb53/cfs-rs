@@ -38,3 +38,10 @@ apps/ios/CPMobile.xcodeproj/xcuserdata/
 *.dll
 
 /patches
+
+# Worktrees
+.worktrees/
+
+# Worktrees
+.worktrees/
+worktrees/
