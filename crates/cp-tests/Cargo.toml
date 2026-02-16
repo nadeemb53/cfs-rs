@@ -12,8 +12,8 @@ cp-embeddings = { path = "../cp-embeddings" }
 cp-sync = { path = "../cp-sync" }
 cp-desktop = { path = "../cp-desktop" }
 cp-query = { path = "../cp-query" }
-tokio = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true }
 uuid = { workspace = true }
 hex = { workspace = true }
 tracing = { workspace = true }

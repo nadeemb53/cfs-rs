@@ -37,6 +37,58 @@ struct RootInfo {
     // size: usize,    // Unused for now
 }
 
+// ============================================================================
+// Device Pairing Types
+// ============================================================================
+
+/// Pairing initiation request
+#[derive(Serialize)]
+pub struct PairInitRequest {
+    device_id: String,
+    public_key: String,
+    display_name: Option<String>,
+}
+
+/// Pairing initiation response
+#[derive(Deserialize)]
+pub struct PairInitResponse {
+    pairing_id: String,
+    pairing_code: String,
+    expires_at: i64,
+}
+
+/// Pairing response request
+#[derive(Serialize)]
+pub struct PairRespondRequest {
+    pairing_id: String,
+    device_id: String,
+    public_key: String,
+    display_name: Option<String>,
+}
+
+/// Pairing confirmation request
+#[derive(Serialize)]
+pub struct PairConfirmRequest {
+    pairing_id: String,
+}
+
+/// Pairing confirmation response
+#[derive(Deserialize)]
+pub struct PairConfirmResponse {
+    success: bool,
+    peer_device_id: String,
+    peer_display_name: Option<String>,
+}
+
+/// Device info
+#[derive(Deserialize)]
+pub struct DeviceInfo {
+    device_id: String,
+    display_name: Option<String>,
+    created_at: i64,
+    last_seen: Option<i64>,
+}
+
 impl RelayClient {
     /// Create a new relay client
     pub fn new(base_url: &str, auth_token: &str, device_id: [u8; 16]) -> Self {
@@ -369,5 +421,128 @@ impl RelayClient {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
         }
+    }
+
+    // ============================================================================
+    // Device Pairing Methods
+    // ============================================================================
+
+    /// Initiate device pairing - step 1
+    pub async fn pair_init(&self, device_id: &str, public_key: &str, display_name: Option<&str>) -> Result<PairInitResponse> {
+        let url = format!("{}/api/v1/pair/init", self.base_url);
+
+        let request = PairInitRequest {
+            device_id: device_id.to_string(),
+            public_key: public_key.to_string(),
+            display_name: display_name.map(|s| s.to_string()),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to initiate pairing: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CPError::Sync(format!(
+                "Pairing init failed with status: {}",
+                response.status()
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to parse pairing response: {}", e)))
+    }
+
+    /// Respond to pairing - step 2
+    pub async fn pair_respond(&self, pairing_id: &str, device_id: &str, public_key: &str, display_name: Option<&str>) -> Result<()> {
+        let url = format!("{}/api/v1/pair/respond", self.base_url);
+
+        let request = PairRespondRequest {
+            pairing_id: pairing_id.to_string(),
+            device_id: device_id.to_string(),
+            public_key: public_key.to_string(),
+            display_name: display_name.map(|s| s.to_string()),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to respond to pairing: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CPError::Sync(format!(
+                "Pairing respond failed with status: {}",
+                response.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Confirm pairing - step 3
+    pub async fn pair_confirm(&self, pairing_id: &str) -> Result<PairConfirmResponse> {
+        let url = format!("{}/api/v1/pair/confirm", self.base_url);
+
+        let request = PairConfirmRequest {
+            pairing_id: pairing_id.to_string(),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .header("X-Device-ID", hex::encode(self.device_id))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to confirm pairing: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CPError::Sync(format!(
+                "Pairing confirm failed with status: {}",
+                response.status()
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to parse confirm response: {}", e)))
+    }
+
+    /// List paired devices
+    pub async fn list_devices(&self) -> Result<Vec<DeviceInfo>> {
+        let url = format!("{}/api/v1/devices", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.auth_token))
+            .header("X-Device-ID", hex::encode(self.device_id))
+            .send()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to list devices: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(CPError::Sync(format!(
+                "List devices failed with status: {}",
+                response.status()
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| CPError::Sync(format!("Failed to parse devices response: {}", e)))
     }
 }
