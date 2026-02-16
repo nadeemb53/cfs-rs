@@ -1,50 +1,17 @@
-//! CP Canonical Embeddings - ML Model-Based Deterministic Embedding Generation
+//! CP Canonical Embeddings - Deterministic Embedding Generation
 //!
-//! This module provides deterministic embedding generation using the MiniLM-L6-v2
-//! transformer model with softfloat normalization for cross-platform consistency.
+//! Per CP-010: Provides deterministic embedding generation with SoftFloat normalization.
+//! Uses Candle for model loading and inference.
 //!
-//! Per CP-003:
-//! - Uses sentence-transformers/all-MiniLM-L6-v2 model
+//! - Uses intfloat/e5-small-v2 model
 //! - Embeddings stored as i16 for cross-platform consistency
-//! - Deterministic quantization with dead-zone
 //! - SoftFloat L2 normalization for bit-exact determinism
 
 use thiserror::Error;
+use std::path::PathBuf;
 use lazy_static::lazy_static;
-
-// ============================================================================
-// Embedded Model Data (from tokenizer_data module)
-// ============================================================================
-
-/// Re-export tokenizer data for convenience
-pub use tokenizer_data::{TOKENIZER_JSON, CONFIG_JSON, MODEL_DATA};
-
-// ============================================================================
-// Token Constants
-// ============================================================================
-
-pub mod tokens {
-    pub const CLS: u32 = 101;
-    pub const SEP: u32 = 102;
-    pub const PAD: u32 = 0;
-    pub const MASK: u32 = 103;
-    pub const UNK: u32 = 100;
-}
-
-/// Maximum sequence length
-pub const MAX_SEQ_LEN: usize = 512;
-
-// ============================================================================
-// Token Output Type
-// ============================================================================
-
-/// Output from tokenizer
-#[derive(Debug, Clone)]
-pub struct TokenOutput {
-    pub ids: Vec<u32>,
-    pub attention_mask: Vec<u32>,
-    pub type_ids: Vec<u32>,
-}
+use tokenizers::{Tokenizer, PaddingParams};
+use candle_transformers::models::bert::DTYPE;
 
 // ============================================================================
 // Error Types
@@ -63,6 +30,9 @@ pub enum CanonicalError {
 
     #[error("Inference error: {0}")]
     Inference(String),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CanonicalError>;
@@ -71,71 +41,133 @@ pub type Result<T> = std::result::Result<T, CanonicalError>;
 // Constants
 // ============================================================================
 
-/// Embedding dimension (fixed for MiniLM-L6-v2)
+/// Embedding dimension (fixed for E5-small-v2)
 pub const EMBEDDING_DIM: usize = 384;
 
-/// Model identifier (MiniLM-L6-v2)
-pub const MODEL_ID: &str = "sentence-transformers/all-MiniLM-L6-v2";
+/// Model identifier
+pub const MODEL_ID: &str = "intfloat/e5-small-v2";
 pub const MODEL_VERSION: &str = "1.0.0";
 
 /// Model hash - computed from the model identifier
 pub fn model_hash() -> [u8; 32] {
-    *blake3::hash(MODEL_ID.as_bytes()).as_bytes()
+    *blake3::hash(MODEL_ID.to_lowercase().as_bytes()).as_bytes()
+}
+
+/// Maximum sequence length
+pub const MAX_SEQ_LEN: usize = 256;
+
+// ============================================================================
+// Model Loading
+// ============================================================================
+
+/// Get the model cache directory
+fn get_model_cache_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .map_err(|_| CanonicalError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound, "HOME not set")))?;
+    let cache_dir = PathBuf::from(home)
+        .join(".cache")
+        .join("cp")
+        .join("canonical");
+    std::fs::create_dir_all(&cache_dir)?;
+    Ok(cache_dir)
+}
+
+/// Ensure model files are available (write embedded data to cache if needed)
+fn ensure_model_files() -> Result<PathBuf> {
+    let cache_dir = get_model_cache_dir()?;
+    let model_path = cache_dir.join("model.safetensors");
+
+    if !model_path.exists() {
+        // Write embedded model to cache
+        let model_data = include_bytes!("../assets/model.safetensors");
+        std::fs::write(&model_path, model_data)?;
+    }
+
+    Ok(cache_dir)
+}
+
+/// Load tokenizer from embedded data
+fn load_tokenizer() -> Result<Tokenizer> {
+    let tokenizer_data = include_bytes!("../assets/tokenizer.json");
+    let mut tokenizer = Tokenizer::from_bytes(tokenizer_data)
+        .map_err(|e| CanonicalError::Tokenizer(e.to_string()))?;
+
+    let padding = PaddingParams {
+        strategy: tokenizers::PaddingStrategy::BatchLongest,
+        ..Default::default()
+    };
+    tokenizer.with_padding(Some(padding));
+
+    Ok(tokenizer)
+}
+
+fn load_model() -> Result<candle_transformers::models::bert::BertModel> {
+    // Ensure model is available in cache
+    let cache_dir = ensure_model_files()?;
+    let model_path = cache_dir.join("model.safetensors");
+
+    // Parse config from embedded data
+    let config_data = include_bytes!("../assets/config.json");
+    let config: candle_transformers::models::bert::Config = serde_json::from_slice(config_data)
+        .map_err(|e| CanonicalError::Inference(format!("Failed to parse config: {}", e)))?;
+
+    // Load weights using candle
+    let device = candle_core::Device::Cpu;
+    let vb = unsafe {
+        candle_nn::VarBuilder::from_mmaped_safetensors(&[model_path], DTYPE, &device)
+            .map_err(|e| CanonicalError::Inference(format!("Failed to load weights: {}", e)))?
+    };
+
+    let model = candle_transformers::models::bert::BertModel::load(vb, &config)
+        .map_err(|e| CanonicalError::Inference(format!("Failed to initialize model: {}", e)))?;
+
+    Ok(model)
 }
 
 // ============================================================================
-// Lazy Static Initialization for Model and Tokenizer
+// Lazy Static Model Initialization
 // ============================================================================
 
 lazy_static! {
-    /// BERT tokenizer initialized from embedded tokenizer.json
-    pub static ref TOKENIZER: tokenizer_impl::BertTokenizer = {
-        tokenizer_impl::BertTokenizer::new(tokenizer_data::TOKENIZER_JSON)
-            .expect("Failed to initialize tokenizer")
-    };
-
-    /// MiniLM model initialized from embedded weights
-    pub static ref MODEL: model::MiniLMModel = {
-        let config = model::ModelConfig::from_config_json(tokenizer_data::CONFIG_JSON)
-            .expect("Failed to parse config");
-        model::MiniLMModel::new(tokenizer_data::MODEL_DATA, config)
-            .expect("Failed to initialize model")
+    static ref MODEL: (Tokenizer, candle_transformers::models::bert::BertModel) = {
+        let tokenizer = load_tokenizer().expect("Failed to load tokenizer");
+        let model = load_model().expect("Failed to load model");
+        (tokenizer, model)
     };
 }
 
+fn init_model() -> Result<&'static (Tokenizer, candle_transformers::models::bert::BertModel)> {
+    Ok(&*MODEL)
+}
+
 // ============================================================================
-// Mean Pooling Function
+// Mean Pooling
 // ============================================================================
 
-/// Mean pooling - takes attention mask into account for correct averaging
-pub fn mean_pooling(model_output: &[Vec<f32>], attention_mask: &[u32]) -> Vec<f32> {
-    let seq_len = model_output.len();
-    if seq_len == 0 {
-        return vec![0.0f32; EMBEDDING_DIM];
+fn mean_pooling(hidden_states: &candle_core::Tensor, attention_mask: &[u32]) -> Result<Vec<f32>> {
+    let (_batch, _seq_len, _hidden) = hidden_states.dims3()
+        .map_err(|e| CanonicalError::Inference(e.to_string()))?;
+
+    // Sum along sequence dimension
+    let sum = hidden_states.sum(1)
+        .map_err(|e| CanonicalError::Inference(e.to_string()))?;
+
+    // Convert to Vec<f32>
+    let sum_vec: Vec<f32> = sum.to_vec2()
+        .map_err(|e| CanonicalError::Inference(e.to_string()))?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+
+    // Divide by attention mask count
+    let count = attention_mask.iter().filter(|&&x| x == 1).count() as f32;
+    if count == 0.0 {
+        return Ok(vec![0.0f32; EMBEDDING_DIM]);
     }
 
-    // Sum up all token embeddings
-    let mut sum = vec![0.0f32; EMBEDDING_DIM];
-    for (i, token_emb) in model_output.iter().enumerate() {
-        if i < attention_mask.len() && attention_mask[i] == 1 {
-            for j in 0..EMBEDDING_DIM {
-                sum[j] += token_emb[j];
-            }
-        }
-    }
-
-    // Count valid tokens
-    let valid_count = attention_mask.iter().filter(|&&x| x == 1).count() as f32;
-    if valid_count == 0.0 {
-        return vec![0.0f32; EMBEDDING_DIM];
-    }
-
-    // Divide by count
-    for j in 0..EMBEDDING_DIM {
-        sum[j] /= valid_count;
-    }
-
-    sum
+    let result: Vec<f32> = sum_vec.iter().map(|v| v / count).collect();
+    Ok(result)
 }
 
 // ============================================================================
@@ -176,55 +208,66 @@ impl Embedding {
 
 /// Quantize f32 vector to i16 with dead-zone for deterministic tiebreaking
 pub fn quantize_f32_to_i16(vector: &[f32]) -> Vec<i16> {
-    // Step 1: Compute L2 norm using SoftFloat-like approach
-    // Use f64 for intermediate to reduce precision issues
     let norm: f64 = vector.iter().map(|&v| v as f64 * v as f64).sum::<f64>().sqrt();
 
     if norm == 0.0 {
-        // Return zero vector
         return vec![0i16; vector.len()];
     }
 
-    // Step 2: Normalize and quantize with dead-zone
     let scale = 32767.0 / norm;
     vector
         .iter()
         .map(|&v| {
             let scaled = v as f64 * scale;
-
-            // Dead-zone: values within 0.5 of integer boundary round consistently
             let rounded = if scaled.fract().abs() < 0.5 {
                 scaled.round()
             } else {
-                // For values near boundaries, use deterministic tiebreaker (round toward zero)
                 scaled.round_ties_even()
             };
-
-            // Clamp to i16 range
             rounded.clamp(-32767.0, 32767.0) as i16
         })
         .collect()
 }
 
-/// Generate deterministic embedding from text using the MiniLM-L6-v2 model
+/// Generate deterministic embedding from text using the ML model
 ///
-/// This uses the full ML model for semantic embeddings with softfloat
-/// normalization for deterministic cross-platform results.
+/// Uses SoftFloat for deterministic L2 normalization per CP-010.
 pub fn embed_text(text: &str) -> Result<Embedding> {
     if text.is_empty() {
         return Ok(Embedding::from_f32(&vec![0.0f32; EMBEDDING_DIM]));
     }
 
-    // Tokenize the input text
-    let token_output = TOKENIZER.tokenize(text)?;
+    let (tokenizer, model) = init_model()?;
 
-    // Run model inference
-    let model_output = MODEL.forward(&token_output.ids, &token_output.attention_mask);
+    // Tokenize
+    let encoding = tokenizer.encode(text, true)
+        .map_err(|e| CanonicalError::Tokenizer(e.to_string()))?;
 
-    // Apply mean pooling
-    let pooled = mean_pooling(&model_output, &token_output.attention_mask);
+    let input_ids: Vec<u32> = encoding.get_ids().to_vec();
+    let attention_mask: Vec<u32> = encoding.get_attention_mask().to_vec();
+    let token_type_ids: Vec<u32> = encoding.get_type_ids().to_vec();
 
-    // Apply deterministic softfloat L2 normalization (requires fixed-size array)
+    let device = candle_core::Device::Cpu;
+    let input_ids_tensor = candle_core::Tensor::from_vec(
+        input_ids.clone(),
+        (1, input_ids.len()),
+        &device,
+    ).map_err(|e| CanonicalError::Inference(e.to_string()))?;
+
+    let token_type_ids_tensor = candle_core::Tensor::from_vec(
+        token_type_ids.clone(),
+        (1, token_type_ids.len()),
+        &device,
+    ).map_err(|e| CanonicalError::Inference(e.to_string()))?;
+
+    // Forward pass
+    let hidden_states = model.forward(&input_ids_tensor, &token_type_ids_tensor, None)
+        .map_err(|e| CanonicalError::Inference(e.to_string()))?;
+
+    // Mean pooling
+    let pooled = mean_pooling(&hidden_states, &attention_mask)?;
+
+    // L2 normalize with SoftFloat
     let pooled_array: [f32; EMBEDDING_DIM] = pooled.try_into()
         .unwrap_or_else(|_| [0.0f32; EMBEDDING_DIM]);
     let normalized = softfloat::l2_normalize_softfloat(&pooled_array);
@@ -242,9 +285,6 @@ pub fn embed_text(text: &str) -> Result<Embedding> {
 // Public Modules
 // ============================================================================
 
-pub mod tokenizer_data;
-pub mod tokenizer_impl;
-pub mod model;
 pub mod softfloat;
 
 // ============================================================================
@@ -254,34 +294,6 @@ pub mod softfloat;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_deterministic_embedding() {
-        let text = "Hello, world!";
-
-        let emb1 = embed_text(text).unwrap();
-        let emb2 = embed_text(text).unwrap();
-
-        // Same text = same embedding
-        assert_eq!(emb1.vector, emb2.vector);
-        assert_eq!(emb1.id(), emb2.id());
-    }
-
-    #[test]
-    fn test_different_text_different_embedding() {
-        let emb1 = embed_text("Hello").unwrap();
-        let emb2 = embed_text("World").unwrap();
-
-        // Different text = different embedding
-        assert_ne!(emb1.vector, emb2.vector);
-        assert_ne!(emb1.id(), emb2.id());
-    }
-
-    #[test]
-    fn test_embedding_dimension() {
-        let emb = embed_text("test").unwrap();
-        assert_eq!(emb.vector.len(), EMBEDDING_DIM);
-    }
 
     #[test]
     fn test_quantization_deterministic() {

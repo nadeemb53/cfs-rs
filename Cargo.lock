@@ -858,11 +858,16 @@ name = "cp-canonical-embeddings"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
  "lazy_static",
  "safetensors",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokenizers",
 ]
 
 [[package]]
@@ -929,6 +934,7 @@ dependencies = [
  "candle-transformers",
  "cp-core",
  "dirs",
+ "lazy_static",
  "ndarray",
  "serde_json",
  "thiserror 2.0.18",

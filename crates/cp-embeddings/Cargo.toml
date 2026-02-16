@@ -22,3 +22,4 @@ serde_json = { workspace = true }
 ureq = { workspace = true }
 blake3 = { workspace = true }
 dirs = "5.0"
+lazy_static = "1.4"
