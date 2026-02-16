@@ -108,7 +108,7 @@ lazy_static! {
 // ============================================================================
 
 /// Mean pooling - takes attention mask into account for correct averaging
-fn mean_pooling(model_output: &[Vec<f32>], attention_mask: &[u32]) -> Vec<f32> {
+pub fn mean_pooling(model_output: &[Vec<f32>], attention_mask: &[u32]) -> Vec<f32> {
     let seq_len = model_output.len();
     if seq_len == 0 {
         return vec![0.0f32; EMBEDDING_DIM];

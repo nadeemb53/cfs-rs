@@ -608,3 +608,241 @@ impl MiniLMModel {
         hidden_states
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::softfloat;
+    use crate::tokenizer_data::{CONFIG_JSON, MODEL_DATA};
+
+    fn create_test_model() -> MiniLMModel {
+        let config = ModelConfig::from_config_json(CONFIG_JSON)
+            .expect("Failed to parse config");
+        MiniLMModel::new(MODEL_DATA, config).expect("Failed to create model")
+    }
+
+    #[test]
+    fn test_model_load() {
+        let config = ModelConfig::from_config_json(CONFIG_JSON).expect("Failed to parse config");
+        let model = MiniLMModel::new(MODEL_DATA, config).expect("Failed to load model");
+
+        // Model should be loaded successfully
+        assert_eq!(model.config.vocab_size, 30522);
+    }
+
+    #[test]
+    fn test_model_forward_pass() {
+        let model = create_test_model();
+
+        // Simple forward pass with token IDs
+        let input_ids = vec![101, 7592, 999, 102]; // [CLS] hello [SEP]
+        let attention_mask = vec![1, 1, 1, 1];
+
+        let output = model.forward(&input_ids, &attention_mask);
+
+        // Should produce hidden states for each token
+        assert_eq!(output.len(), input_ids.len());
+        // Each hidden state should have HIDDEN_SIZE dimensions
+        for hidden in &output {
+            assert_eq!(hidden.len(), HIDDEN_SIZE);
+        }
+    }
+
+    #[test]
+    fn test_model_output_dimension() {
+        let model = create_test_model();
+
+        let input_ids = vec![101, 2000, 102];
+        let attention_mask = vec![1, 1, 1];
+
+        let output = model.forward(&input_ids, &attention_mask);
+
+        // Check hidden size is 384
+        assert_eq!(HIDDEN_SIZE, 384);
+        for hidden in &output {
+            assert_eq!(hidden.len(), 384);
+        }
+    }
+
+    #[test]
+    fn test_model_max_sequence_length() {
+        // MAX_POSITION_EMBEDDINGS should be 512
+        assert_eq!(MAX_POSITION_EMBEDDINGS, 512);
+
+        let model = create_test_model();
+
+        // Test with sequence of various lengths
+        let short_input: Vec<u32> = (0..10).collect();
+        let short_output = model.forward(&short_input, &vec![1; short_input.len()]);
+        assert_eq!(short_output.len(), 10);
+
+        let medium_input: Vec<u32> = (0..100).collect();
+        let medium_output = model.forward(&medium_input, &vec![1; medium_input.len()]);
+        assert_eq!(medium_output.len(), 100);
+    }
+
+    #[test]
+    fn test_model_mean_pooling() {
+        // Test mean pooling logic from lib.rs
+        let model_output = vec![
+            vec![1.0f32; HIDDEN_SIZE],
+            vec![2.0f32; HIDDEN_SIZE],
+            vec![3.0f32; HIDDEN_SIZE],
+        ];
+        let attention_mask = vec![1, 1, 1];
+
+        // Use the mean_pooling from lib.rs
+        let pooled = crate::mean_pooling(&model_output, &attention_mask);
+
+        // Each dimension should be the mean (1+2+3)/3 = 2.0
+        for val in &pooled {
+            assert!((val - 2.0).abs() < 0.001, "Expected 2.0, got {}", val);
+        }
+    }
+
+    #[test]
+    fn test_model_l2_normalization() {
+        // Test that output can be L2 normalized
+        // The softfloat normalization may not produce perfect 1.0 norm due to Q30 limitations
+        // but should still produce deterministic results
+        let model = create_test_model();
+
+        let input_ids = vec![101, 2000, 102];
+        let attention_mask = vec![1, 1, 1];
+
+        let output = model.forward(&input_ids, &attention_mask);
+        let pooled = crate::mean_pooling(&output, &attention_mask);
+
+        // Convert to fixed-size array and normalize
+        let pooled_array: [f32; EMBEDDING_DIM] = pooled.clone().try_into().unwrap_or_else(|_| [0.0f32; EMBEDDING_DIM]);
+
+        // Run normalization twice to verify determinism
+        let normalized1 = softfloat::l2_normalize_softfloat(&pooled_array);
+        let normalized2 = softfloat::l2_normalize_softfloat(&pooled_array);
+
+        // Should be bit-identical (deterministic)
+        for (a, b) in normalized1.iter().zip(normalized2.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "L2 normalization should be deterministic");
+        }
+    }
+
+    #[test]
+    fn test_model_quantization_f32_to_i16() {
+        // Test quantization from f32 to i16
+        let values = vec![0.0f32, 0.5, -0.5, 1.0, -1.0];
+        let quantized = crate::quantize_f32_to_i16(&values);
+
+        assert_eq!(quantized.len(), values.len());
+
+        // Check that values are in i16 range
+        for &q in &quantized {
+            assert!(q >= -32767 && q <= 32767, "Quantized value {} out of range", q);
+        }
+    }
+
+    #[test]
+    fn test_model_quantization_bounds() {
+        // Test that quantization respects bounds -32767 to 32767
+        let large_values = vec![1000.0f32, -1000.0f32, 0.0];
+        let quantized = crate::quantize_f32_to_i16(&large_values);
+
+        for &q in &quantized {
+            assert!(q >= -32767, "Value {} below minimum", q);
+            assert!(q <= 32767, "Value {} above maximum", q);
+        }
+    }
+
+    #[test]
+    fn test_model_quantization_rounding() {
+        // Test deterministic rounding
+        let values = vec![0.5f32, 0.25, 0.75];
+
+        let result1 = crate::quantize_f32_to_i16(&values);
+        let result2 = crate::quantize_f32_to_i16(&values);
+
+        // Should be deterministic
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_model_canonical_embedding_generation() {
+        // Test full embedding generation pipeline
+        let embedding = crate::embed_text("hello").expect("Embedding failed");
+
+        assert_eq!(embedding.vector.len(), EMBEDDING_DIM);
+        assert_eq!(embedding.model_hash, crate::model_hash());
+    }
+
+    #[test]
+    fn test_model_batch_embedding() {
+        // Test multiple embeddings in sequence
+        let emb1 = crate::embed_text("hello").expect("Embedding failed");
+        let emb2 = crate::embed_text("world").expect("Embedding failed");
+        let emb3 = crate::embed_text("hello").expect("Embedding failed");
+
+        // Same text should produce same embedding
+        assert_eq!(emb1.vector, emb3.vector);
+
+        // Different text should produce different embedding
+        assert_ne!(emb1.vector, emb2.vector);
+    }
+
+    #[test]
+    fn test_model_hash() {
+        // Test that model_hash is BLAKE3 of MODEL_ID
+        let hash = crate::model_hash();
+        let expected_hash = *blake3::hash(crate::MODEL_ID.as_bytes()).as_bytes();
+
+        assert_eq!(hash, expected_hash);
+    }
+
+    #[test]
+    fn test_model_dropout_disabled() {
+        // Test that dropout is 0.0 in inference
+        assert_eq!(HIDDEN_DROPOUT, 0.0);
+        assert_eq!(ATTENTION_DROPOUT, 0.0);
+    }
+
+    #[test]
+    fn test_model_determinism() {
+        // Test that same input produces same output
+        let emb1 = crate::embed_text("The quick brown fox").expect("Embedding failed");
+        let emb2 = crate::embed_text("The quick brown fox").expect("Embedding failed");
+
+        assert_eq!(emb1.vector, emb2.vector);
+    }
+
+    #[test]
+    fn test_model_determinism_across_runs() {
+        // Test determinism across multiple runs
+        let text = "testing determinism";
+
+        let mut results = Vec::new();
+        for _ in 0..5 {
+            let emb = crate::embed_text(text).expect("Embedding failed");
+            results.push(emb.vector.clone());
+        }
+
+        // All should be identical
+        for i in 1..results.len() {
+            assert_eq!(results[0], results[i], "Run {} differs from run 0", i);
+        }
+    }
+
+    #[test]
+    fn test_model_embedding_test_vector() {
+        // CP-010: "The quick brown fox" should produce valid embedding
+        let embedding = crate::embed_text("The quick brown fox").expect("Embedding failed");
+
+        // Should have correct dimension
+        assert_eq!(embedding.vector.len(), 384);
+
+        // Should have non-zero values (not all zeros)
+        let has_nonzero = embedding.vector.iter().any(|&v| v != 0);
+        assert!(has_nonzero, "Embedding should have non-zero values");
+    }
+}

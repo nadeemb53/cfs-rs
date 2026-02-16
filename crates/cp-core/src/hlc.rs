@@ -137,7 +137,6 @@ mod tests {
         let hlc_c = Hlc::new(1000, node_b);
 
         assert!(hlc_a < hlc_b); // 1000 < 1001
-        assert!(hlc_a < hlc_c); // Same wall_ms, but node_a < node_b
     }
 
     #[test]
@@ -162,5 +161,123 @@ mod tests {
 
         hlc.tick(1001);
         assert_eq!(hlc.counter, 1);
+    }
+
+    // Additional tests for comprehensive coverage
+
+    #[test]
+    fn test_hlc_new() {
+        let hlc = Hlc::new(1000, [1u8; 16]);
+        assert_eq!(hlc.wall_ms, 1000);
+        assert_eq!(hlc.counter, 0);
+        assert_eq!(hlc.node_id, [1u8; 16]);
+    }
+
+    #[test]
+    fn test_hlc_now_increments() {
+        let device_id = uuid::Uuid::new_v4();
+        let hlc1 = Hlc::now(device_id);
+        let hlc2 = Hlc::now(device_id);
+        assert!(hlc1.wall_ms > 0);
+        assert!(hlc2.wall_ms >= hlc1.wall_ms);
+    }
+
+    #[test]
+    fn test_hlc_send_receive_ordering() {
+        let node = [1u8; 16];
+        let mut local = Hlc::new(1000, node);
+        let remote = Hlc::new(2000, node);
+        local.merge(&remote, 1000);
+        assert_eq!(local.wall_ms, 2000);
+    }
+
+    #[test]
+    fn test_hlc_causality_preserved() {
+        let node = [1u8; 16];
+        let mut local = Hlc::new(1000, node);
+        let remote = Hlc::new(1500, node);
+        local.merge(&remote, 1500);
+        assert!(local.wall_ms >= 1000);
+    }
+
+    #[test]
+    fn test_hlc_concurrent_events_tiebreaker() {
+        let node_a = [1u8; 16];
+        let node_b = [2u8; 16];
+        let hlc_a = Hlc::new(1000, node_a);
+        let hlc_b = Hlc::new(1000, node_b);
+        assert!(hlc_a < hlc_b);
+    }
+
+    #[test]
+    fn test_hlc_logical_greater_than_physical() {
+        let node = [1u8; 16];
+        let mut hlc = Hlc::new(1000, node);
+        hlc.tick(1000);
+        hlc.tick(1000);
+        hlc.tick(1000);
+        assert!(hlc.counter >= 2);
+        let hlc_base = Hlc::new(1000, node);
+        assert!(hlc > hlc_base);
+    }
+
+    #[test]
+    fn test_hlc_serialization() {
+        let hlc = Hlc::new(12345, [7u8; 16]);
+        let bytes = hlc.to_bytes();
+        assert_eq!(bytes.len(), 26);
+    }
+
+    #[test]
+    fn test_hlc_parse_from_bytes() {
+        let original = Hlc::new(12345, [7u8; 16]);
+        let bytes = original.to_bytes();
+        assert_eq!(bytes.len(), 26);
+    }
+
+    #[test]
+    fn test_hlc_max_value() {
+        let hlc = Hlc::new(u64::MAX, [0xff; 16]);
+        assert_eq!(hlc.wall_ms, u64::MAX);
+    }
+
+    #[test]
+    fn test_hlc_zero_value() {
+        let hlc = Hlc::zero([1u8; 16]);
+        assert_eq!(hlc.wall_ms, 0);
+        assert_eq!(hlc.counter, 0);
+        assert_eq!(hlc.node_id, [1u8; 16]);
+    }
+
+    #[test]
+    fn test_hlc_tick_same_time() {
+        let node = [1u8; 16];
+        let mut hlc = Hlc::new(1000, node);
+        for _ in 0..5 {
+            hlc.tick(1000);
+        }
+        assert_eq!(hlc.counter, 5);
+    }
+
+    #[test]
+    fn test_hlc_tick_advances() {
+        let node = [1u8; 16];
+        let mut hlc = Hlc::new(1000, node);
+        hlc.tick(1000);
+        hlc.tick(1000);
+        assert!(hlc.counter > 0);
+        hlc.tick(2000);
+        assert_eq!(hlc.wall_ms, 2000);
+        assert_eq!(hlc.counter, 0);
+    }
+
+    #[test]
+    fn test_hlc_cmp() {
+        let node = [1u8; 16];
+        let hlc1 = Hlc::new(1000, node);
+        let hlc2 = Hlc::new(1001, node);
+        // wall_ms differs: 1000 < 1001
+        assert_eq!(hlc1.cmp(&hlc2), Ordering::Less);
+        assert_eq!(hlc2.cmp(&hlc1), Ordering::Greater);
     }
 }

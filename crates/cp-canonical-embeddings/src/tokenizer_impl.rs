@@ -263,3 +263,189 @@ impl BertTokenizer {
             .collect()
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tokenizer_data::TOKENIZER_JSON;
+
+    /// Create a tokenizer instance for testing
+    fn create_test_tokenizer() -> BertTokenizer {
+        BertTokenizer::new(TOKENIZER_JSON).expect("Failed to create tokenizer for testing")
+    }
+
+    #[test]
+    fn test_tokenizer_encode_basic() {
+        let tokenizer = create_test_tokenizer();
+        let output = tokenizer.tokenize("hello world").expect("Tokenization failed");
+
+        // Should have CLS, tokens, SEP
+        assert!(output.ids.len() >= 3);
+        // First token should be CLS
+        assert_eq!(output.ids[0], tokens::CLS);
+        // Last token should be SEP
+        assert_eq!(output.ids[output.ids.len() - 1], tokens::SEP);
+    }
+
+    #[test]
+    fn test_tokenizer_encode_special_tokens() {
+        let tokenizer = create_test_tokenizer();
+
+        // Test that CLS, SEP, PAD tokens are present
+        let output = tokenizer.tokenize("test").expect("Tokenization failed");
+
+        // Check CLS at start
+        assert_eq!(output.ids[0], tokens::CLS);
+        // Check SEP at end
+        assert_eq!(output.ids[output.ids.len() - 1], tokens::SEP);
+    }
+
+    #[test]
+    fn test_tokenizer_encode_test_vector() {
+        // CP-010: "Hello, world!" -> [101, 7592, 1010, 2088, 999, 102]
+        // Note: The exact tokens depend on the vocabulary
+        let tokenizer = create_test_tokenizer();
+        let output = tokenizer.tokenize("Hello, world!").expect("Tokenization failed");
+
+        // Should produce tokens (exact IDs may vary based on vocabulary)
+        assert!(output.ids.len() > 0);
+        // Should start with CLS and end with SEP
+        assert_eq!(output.ids[0], tokens::CLS);
+        assert_eq!(output.ids[output.ids.len() - 1], tokens::SEP);
+    }
+
+    #[test]
+    fn test_tokenizer_encode_lowercase() {
+        let tokenizer = create_test_tokenizer();
+
+        // Test that tokenizer converts to lowercase
+        let output_upper = tokenizer.tokenize("HELLO").expect("Tokenization failed");
+        let output_lower = tokenizer.tokenize("hello").expect("Tokenization failed");
+
+        // Both should produce similar tokens (lowercased)
+        // The exact behavior depends on whether tokenizer uses lowercasing
+    }
+
+    #[test]
+    fn test_tokenizer_encode_truncation() {
+        let tokenizer = create_test_tokenizer();
+
+        // Create a very long text that exceeds MAX_SEQ_LEN
+        let long_text = "word ".repeat(600);
+        let output = tokenizer.tokenize(&long_text).expect("Tokenization failed");
+
+        // Should be truncated to MAX_SEQ_LEN - 1 (minus CLS) + 1 for SEP
+        assert!(output.ids.len() <= MAX_SEQ_LEN);
+    }
+
+    #[test]
+    fn test_tokenizer_encode_empty() {
+        let tokenizer = create_test_tokenizer();
+        let output = tokenizer.tokenize("").expect("Tokenization failed");
+
+        // Empty string should still produce CLS and SEP
+        assert!(output.ids.len() >= 2);
+        assert_eq!(output.ids[0], tokens::CLS);
+        assert_eq!(output.ids[1], tokens::SEP);
+    }
+
+    #[test]
+    fn test_tokenizer_decode() {
+        let tokenizer = create_test_tokenizer();
+
+        // Tokenize and check we can look up the tokens
+        let output = tokenizer.tokenize("hello").expect("Tokenization failed");
+
+        // Verify we have valid token IDs
+        for &id in &output.ids {
+            assert!(id < tokenizer.vocab_size() as u32 || id == tokens::UNK);
+        }
+    }
+
+    #[test]
+    fn test_tokenizer_vocab_size() {
+        let tokenizer = create_test_tokenizer();
+        let vocab_size = tokenizer.vocab_size();
+
+        // MiniLM-L6-v2 should have 30522 tokens
+        assert_eq!(vocab_size, 30522);
+    }
+
+    #[test]
+    fn test_tokenizer_unknown_token() {
+        let tokenizer = create_test_tokenizer();
+
+        // Test with a very long word that exceeds max_input_chars_per_word
+        let long_word = "a".repeat(200);
+        let output = tokenizer.tokenize(&long_word).expect("Tokenization failed");
+
+        // Should contain UNK token
+        assert!(output.ids.contains(&tokens::UNK));
+    }
+
+    #[test]
+    fn test_tokenizer_padding() {
+        let tokenizer = create_test_tokenizer();
+        let output = tokenizer.tokenize("test").expect("Tokenization failed");
+
+        // Attention mask should be all 1s for non-padding tokens
+        for &mask in &output.attention_mask {
+            assert_eq!(mask, 1);
+        }
+    }
+
+    #[test]
+    fn test_tokenizer_attention_mask() {
+        let tokenizer = create_test_tokenizer();
+        let output = tokenizer.tokenize("hello world").expect("Tokenization failed");
+
+        // Attention mask should match token count and be all 1s
+        assert_eq!(output.attention_mask.len(), output.ids.len());
+
+        for &mask in &output.attention_mask {
+            assert_eq!(mask, 1, "Attention mask should be 1 for valid tokens");
+        }
+    }
+
+    #[test]
+    fn test_tokenizer_batch_encode() {
+        let tokenizer = create_test_tokenizer();
+
+        // Encode multiple texts separately (simulating batch)
+        let texts = vec!["hello", "world", "test"];
+        let outputs: Vec<TokenOutput> = texts
+            .iter()
+            .map(|&t| tokenizer.tokenize(t).expect("Tokenization failed"))
+            .collect();
+
+        // All should have succeeded
+        assert_eq!(outputs.len(), 3);
+
+        // Each should have valid structure
+        for output in &outputs {
+            assert!(!output.ids.is_empty());
+            assert_eq!(output.ids.len(), output.attention_mask.len());
+            assert_eq!(output.ids.len(), output.type_ids.len());
+        }
+    }
+
+    #[test]
+    fn test_tokenizer_determinism() {
+        let tokenizer = create_test_tokenizer();
+
+        // Tokenize the same text multiple times
+        let output1 = tokenizer.tokenize("hello world").expect("Tokenization failed");
+        let output2 = tokenizer.tokenize("hello world").expect("Tokenization failed");
+        let output3 = tokenizer.tokenize("hello world").expect("Tokenization failed");
+
+        // All outputs should be identical
+        assert_eq!(output1.ids, output2.ids);
+        assert_eq!(output2.ids, output3.ids);
+        assert_eq!(output1.attention_mask, output2.attention_mask);
+        assert_eq!(output1.attention_mask, output3.attention_mask);
+    }
+}

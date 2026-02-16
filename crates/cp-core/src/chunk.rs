@@ -302,7 +302,7 @@ mod tests {
 
         for text in valid_texts {
             let chunk = Chunk::new(doc_id, text.to_string(), 0, 0);
-            assert!(chunk.text.is_utf8());
+            assert!(chunk.text.chars().next().is_some() || chunk.text.is_empty());
         }
     }
 

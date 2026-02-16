@@ -71,6 +71,11 @@ impl Fixed30 {
         Self(self.0.wrapping_add(other.0))
     }
 
+    /// Subtract
+    pub const fn sub(self, other: Self) -> Self {
+        Self(self.0.wrapping_sub(other.0))
+    }
+
     /// Multiply: Q30 * Q30 -> Q30 (with rounding)
     pub const fn mul(self, other: Self) -> Self {
         // 32-bit * 32-bit = 64-bit, then shift right 30 bits with rounding
@@ -334,9 +339,158 @@ impl SoftFloat64 {
 mod tests {
     use super::*;
 
-    #[test]
+    // Note: The #[test] markers below are already in the original file
+    // We need to add the additional tests requested
 
     #[test]
+    fn test_softfloat_add() {
+        // Test Fixed30 addition - values in Q30 range
+        let a = Fixed30::from_f32(0.5);
+        let b = Fixed30::from_f32(0.25);
+        let c = a.add(b);
+        let result = c.to_f32();
+
+        assert!((result - 0.75).abs() < 0.01, "Expected ~0.75, got {}", result);
+    }
+
+    #[test]
+    fn test_softfloat_subtract() {
+        let a = Fixed30::from_f32(0.75);
+        let b = Fixed30::from_f32(0.25);
+        let c = a.sub(b);
+        let result = c.to_f32();
+
+        assert!((result - 0.5).abs() < 0.01, "Expected ~0.5, got {}", result);
+    }
+
+    #[test]
+    fn test_softfloat_multiply() {
+        // Q30 multiplication needs smaller values
+        let a = Fixed30::from_f32(0.5);
+        let b = Fixed30::from_f32(0.5);
+        let c = a.mul(b);
+        let result = c.to_f32();
+
+        assert!((result - 0.25).abs() < 0.01, "Expected ~0.25, got {}", result);
+    }
+
+    #[test]
+    fn test_softfloat_divide() {
+        let a = Fixed30::from_f32(0.5);
+        let b = Fixed30::from_f32(0.25);
+        let c = a.div(b);
+        let result = c.to_f32();
+
+        assert!((result - 2.0).abs() < 0.1, "Expected ~2.0, got {}", result);
+    }
+
+    #[test]
+    fn test_softfloat_sqrt() {
+        let a = Fixed30::from_f32(0.25);
+        let result = fixed30_sqrt(a).to_f32();
+
+        assert!((result - 0.5).abs() < 0.01, "Expected ~0.5, got {}", result);
+    }
+
+    #[test]
+    fn test_softfloat_compare() {
+        let a = Fixed30::from_f32(0.1);
+        let b = Fixed30::from_f32(0.2);
+        let c = Fixed30::from_f32(0.1);
+
+        assert!(a.to_bits() < b.to_bits());
+        assert_eq!(a.to_bits(), c.to_bits());
+    }
+
+    #[test]
+    fn test_softfloat_from_f32() {
+        let val: f32 = 0.5;
+        let fixed = Fixed30::from_f32(val);
+        let back = fixed.to_f32();
+
+        assert!((back - val).abs() < 0.001, "Expected {}, got {}", val, back);
+    }
+
+    #[test]
+    fn test_softfloat_to_f32() {
+        let fixed = Fixed30::from_f32(0.75);
+        let val: f32 = fixed.to_f32();
+
+        assert!((val - 0.75).abs() < 0.001, "Expected 0.75, got {}", val);
+    }
+
+    #[test]
+    fn test_softfloat_determinism() {
+        // Test that same input produces same output across platforms
+        let a = Fixed30::from_f32(0.3);
+        let b = Fixed30::from_f32(0.4);
+
+        // Run multiple times
+        let results: Vec<i32> = (0..10)
+            .map(|_| a.mul(b).to_bits())
+            .collect();
+
+        // All should be identical
+        for i in 1..results.len() {
+            assert_eq!(results[0], results[i], "Determinism check failed at iteration {}", i);
+        }
+    }
+
+    #[test]
+    fn test_softfloat_special_values() {
+        // Test NaN
+        let nan = SoftFloat32::nan();
+        assert!(nan.is_nan());
+
+        // Test Infinity
+        let inf = SoftFloat32::infinity();
+        assert!(inf.is_infinite());
+
+        // Test that regular values are not NaN or Inf
+        let regular = SoftFloat32::from_f32(1.0);
+        assert!(!regular.is_nan());
+        assert!(!regular.is_infinite());
+    }
+
+    #[test]
+    fn test_softfloat_zero() {
+        let zero = Fixed30::zero();
+        assert!(zero.is_zero());
+
+        let from_f32 = Fixed30::from_f32(0.0);
+        assert!(from_f32.is_zero());
+
+        let soft_zero = SoftFloat32::zero();
+        assert!(soft_zero.is_zero());
+    }
+
+    #[test]
+    fn test_softfloat_l2_norm() {
+        // Test L2 normalization with SoftFloat using simple values
+        let mut input = [0.0f32; EMBEDDING_DIM];
+        // Use a single non-zero element
+        input[0] = 1.0;
+
+        let result = l2_normalize_softfloat(&input);
+
+        // First element should be ~1.0 after normalization
+        assert!((result[0] - 1.0).abs() < 0.01, "Expected ~1.0, got {}", result[0]);
+    }
+
+    #[test]
+    fn test_softfloat_division_by_zero() {
+        let a = Fixed30::from_f32(1.0);
+        let b = Fixed30::zero();
+
+        // Division by zero should return max value
+        let result = a.div(b);
+        let val = result.to_f32();
+
+        // Result should be very large or max value
+        assert!(val > 1000.0 || result.to_bits() == i32::MAX);
+    }
+
+    // Original tests below
 
     #[test]
     fn test_isqrt() {

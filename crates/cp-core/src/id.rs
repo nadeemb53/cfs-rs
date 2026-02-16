@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn test_id_length_exact_16_bytes() {
         // Verify exactly 16 bytes for various inputs
-        let inputs = vec![
+        let inputs: Vec<&[u8]> = vec![
             b"a",
             b"hello",
             b"a very long string that goes on and on",
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn test_generate_id_different_inputs_produce_different_ids() {
         // Verify different inputs produce different IDs
-        let inputs = vec![
+        let inputs: Vec<&[u8]> = vec![
             b"hello",
             b"world",
             b"hello world",
