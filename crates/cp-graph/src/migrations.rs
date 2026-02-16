@@ -31,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "add_l2_norm",
         sql: include_str!("migrations/003_add_l2_norm.sql"),
     },
+    Migration {
+        version: 4,
+        name: "add_path_id_and_embedding_version",
+        sql: include_str!("migrations/004_add_path_id_and_embedding_version.sql"),
+    },
 ];
 
 /// Run all pending migrations on the database
@@ -142,7 +147,7 @@ mod tests {
         run_migrations(&conn).unwrap();
 
         let version = get_schema_version(&conn).unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
@@ -154,7 +159,7 @@ mod tests {
 
         run_migrations(&conn).unwrap();
 
-        assert_eq!(get_schema_version(&conn).unwrap(), 3);
+        assert_eq!(get_schema_version(&conn).unwrap(), 4);
         assert!(!needs_migration(&conn).unwrap());
     }
 

@@ -79,18 +79,23 @@ pub fn load_tensor_f32(data: &[u8], name: &str) -> Result<Vec<f32>> {
     let tensors = SafeTensors::deserialize(data)
         .map_err(|e| CanonicalError::Inference(format!("Failed to parse safetensors: {}", e)))?;
 
-    let tensor = tensors.get(name)
-        .ok_or_else(|| CanonicalError::Inference(format!("Tensor not found: {}", name)))?;
+    // tensor() returns Result<TensorView, Error>
+    let tensor = tensors.tensor(name)
+        .map_err(|e| CanonicalError::Inference(format!("Tensor not found: {}: {}", name, e)))?;
 
-    if tensor.dtype() != &safetensors::Dtype::F32 {
+    if tensor.dtype() != safetensors::Dtype::F32 {
         return Err(CanonicalError::Inference(format!("Tensor {} is not f32", name)));
     }
 
-    let view: &[f32] = tensor
-        .try_into()
-        .map_err(|e| CanonicalError::Inference(format!("Failed to convert tensor: {}", e)))?;
+    // Convert tensor to Vec<f32> using the data() method
+    let tensor_data = tensor.data();
+    let mut result = Vec::with_capacity(tensor_data.len() / 4);
+    for chunk in tensor_data.chunks_exact(4) {
+        let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        result.push(val);
+    }
 
-    Ok(view.to_vec())
+    Ok(result)
 }
 
 // ============================================================================

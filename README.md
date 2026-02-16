@@ -46,8 +46,6 @@ This is where it gets interesting.
 
 **Federated AI Networks.** Multiple organizations, each with their own AI, sharing knowledge selectively. Each can verify what others contributed. No single point of trust.
 
-None of this is guaranteed—it's just what's possible when AI memory is built on verifiable foundations.
-
 ## The Implementation
 
 Canon Protocol is written in Rust. The implementation is modular:

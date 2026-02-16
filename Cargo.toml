@@ -15,7 +15,7 @@ members = [
     "crates/cp-canonical-embeddings",
     "crates/cp-inference-mobile",
     "examples/macos/src-tauri",
-    "relay/cp-relay-server",
+    "crates/cp-relay-server",
 ]
 
 [workspace.package]

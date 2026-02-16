@@ -179,4 +179,192 @@ mod tests {
         // Same content = same ID regardless of path
         assert_eq!(doc1.id, doc2.id);
     }
+
+    // Additional tests for comprehensive coverage
+
+    #[test]
+    fn test_document_id_derivation_from_content_hash() {
+        // Verify document ID is derived from content hash
+        let content = b"Test content for ID derivation";
+        let doc = Document::new(PathBuf::from("test.md"), content, 0);
+
+        // ID should be first 16 bytes of BLAKE3 hash of canonicalized content
+        let canonical = normalize("Test content for ID derivation");
+        let expected_hash = blake3::hash(canonical.as_bytes());
+        let mut expected_id_bytes = [0u8; 16];
+        expected_id_bytes.copy_from_slice(&expected_hash.as_bytes()[0..16]);
+        let expected_id = Uuid::from_bytes(expected_id_bytes);
+
+        assert_eq!(doc.id, expected_id);
+    }
+
+    #[test]
+    fn test_document_path_id_derivation() {
+        // Verify path_id is derived from canonicalized path
+        let path = PathBuf::from("test/document.md");
+        let doc = Document::new(path.clone(), b"content", 0);
+
+        // path_id should be BLAKE3-16 of canonicalized path
+        let canonical_path = normalize(&path.to_string_lossy());
+        let expected_hash = blake3::hash(canonical_path.as_bytes());
+        let mut expected_path_id_bytes = [0u8; 16];
+        expected_path_id_bytes.copy_from_slice(&expected_hash.as_bytes()[0..16]);
+        let expected_path_id = Uuid::from_bytes(expected_path_id_bytes);
+
+        assert_eq!(doc.path_id, expected_path_id);
+    }
+
+    #[test]
+    fn test_document_hierarchical_hash_computation() {
+        // Test Merkle hash computation from chunk hashes
+        let chunk_hashes: [[u8; 32]; 3] = [
+            [1u8; 32],
+            [2u8; 32],
+            [3u8; 32],
+        ];
+
+        let hierarchical_hash = Document::compute_hierarchical_hash(&chunk_hashes);
+
+        // Verify it's a 32-byte hash
+        assert_eq!(hierarchical_hash.len(), 32);
+
+        // Verify determinism - same input produces same hash
+        let hierarchical_hash2 = Document::compute_hierarchical_hash(&chunk_hashes);
+        assert_eq!(hierarchical_hash, hierarchical_hash2);
+
+        // Verify different input produces different hash
+        let different_hashes: [[u8; 32]; 2] = [[1u8; 32], [2u8; 32]];
+        let different_result = Document::compute_hierarchical_hash(&different_hashes);
+        assert_ne!(hierarchical_hash, different_result);
+    }
+
+    #[test]
+    fn test_document_serialization() {
+        // Test CBOR round-trip serialization
+        use ciborium::ser::into_writer;
+        use ciborium::de::from_reader;
+
+        let doc = Document::new(
+            PathBuf::from("test.md"),
+            b"Hello, World!",
+            1234567890,
+        );
+
+        // Serialize to CBOR
+        let mut serialized = Vec::new();
+        into_writer(&doc, &mut serialized).unwrap();
+
+        // Deserialize back
+        let deserialized: Document = from_reader(serialized.as_slice()).unwrap();
+
+        // Verify all fields match
+        assert_eq!(doc.id, deserialized.id);
+        assert_eq!(doc.path_id, deserialized.path_id);
+        assert_eq!(doc.path, deserialized.path);
+        assert_eq!(doc.hash, deserialized.hash);
+        assert_eq!(doc.hierarchical_hash, deserialized.hierarchical_hash);
+        assert_eq!(doc.mtime, deserialized.mtime);
+        assert_eq!(doc.size, deserialized.size);
+        assert_eq!(doc.mime_type, deserialized.mime_type);
+    }
+
+    #[test]
+    fn test_document_deserialization_invalid() {
+        // Test handling of malformed data
+        use ciborium::de::from_reader;
+
+        // Invalid CBOR data
+        let invalid_data = vec![0xFF, 0xFF, 0xFF];
+
+        let result: Result<Document, _> = from_reader(invalid_data.as_slice());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_document_canonical_bytes() {
+        // Test to_canonical_bytes format (simulated since we use CBOR)
+        let doc = Document::new(
+            PathBuf::from("test.md"),
+            b"Content",
+            1000,
+        );
+
+        // Verify document has all required fields for canonical bytes
+        let id_bytes = doc.id.as_bytes();
+        let path_id_bytes = doc.path_id.as_bytes();
+
+        assert_eq!(id_bytes.len(), 16);
+        assert_eq!(path_id_bytes.len(), 16);
+        assert_eq!(doc.hash.len(), 32);
+        assert_eq!(doc.hierarchical_hash.len(), 32);
+    }
+
+    #[test]
+    fn test_document_mime_type_detection_markdown() {
+        // Test .md extension detection
+        let doc1 = Document::new(PathBuf::from("readme.md"), b"content", 0);
+        let doc2 = Document::new(PathBuf::from("document.markdown"), b"content", 0);
+
+        assert_eq!(doc1.mime_type, "text/markdown");
+        assert_eq!(doc2.mime_type, "text/markdown");
+    }
+
+    #[test]
+    fn test_document_mime_type_detection_text() {
+        // Test .txt extension detection
+        let doc = Document::new(PathBuf::from("notes.txt"), b"content", 0);
+        assert_eq!(doc.mime_type, "text/plain");
+    }
+
+    #[test]
+    fn test_document_mime_type_detection_unknown() {
+        // Test unknown extension defaults to application/octet-stream
+        let doc1 = Document::new(PathBuf::from("file.xyz"), b"content", 0);
+        let doc2 = Document::new(PathBuf::from("noextension"), b"content", 0);
+
+        assert_eq!(doc1.mime_type, "application/octet-stream");
+        assert_eq!(doc2.mime_type, "application/octet-stream");
+    }
+
+    #[test]
+    fn test_document_size_bytes_calculation() {
+        // Verify size matches content length
+        let content = b"Test content size";
+        let doc = Document::new(PathBuf::from("test.txt"), content, 0);
+
+        assert_eq!(doc.size, content.len() as u64);
+    }
+
+    #[test]
+    fn test_document_mtime_from_filesystem() {
+        // Test mtime is stored correctly
+        let mtime: i64 = 1609459200; // 2021-01-01 00:00:00 UTC
+        let doc = Document::new(PathBuf::from("test.txt"), b"content", mtime);
+
+        assert_eq!(doc.mtime, mtime);
+    }
+
+    #[test]
+    fn test_document_set_hierarchical_hash() {
+        // Test setting hierarchical hash
+        let mut doc = Document::new(PathBuf::from("test.md"), b"content", 0);
+        let new_hash = [42u8; 32];
+
+        doc.set_hierarchical_hash(new_hash);
+
+        assert_eq!(doc.hierarchical_hash, new_hash);
+    }
+
+    #[test]
+    fn test_document_hash_hex() {
+        // Test hash_hex() returns hex string
+        let doc = Document::new(PathBuf::from("test.md"), b"content", 0);
+        let hex_str = doc.hash_hex();
+
+        // Should be 64 characters (32 bytes * 2 hex chars)
+        assert_eq!(hex_str.len(), 64);
+
+        // Should only contain hex characters
+        assert!(hex_str.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }

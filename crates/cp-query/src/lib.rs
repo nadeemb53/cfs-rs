@@ -951,9 +951,16 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("real_corpus.db");
         let mut graph = cp_graph::GraphStore::open(db_path.to_str().unwrap()).unwrap();
-        
+
         // 1. Ingest actual test_corpus files
         let corpus_dir = std::path::PathBuf::from("/Users/nadeem/dev/CP/test_corpus");
+
+        // Skip test if corpus doesn't exist
+        if !corpus_dir.exists() {
+            println!("Skipping test: corpus directory not found at {:?}", corpus_dir);
+            return;
+        }
+
         let embedder = Arc::new(cp_embeddings::EmbeddingEngine::new().unwrap());
         
         let files = vec!["zk.md", "ethereum.md", "random.md", "zksnark.md", "lexical_gap.md", "adversarial.md"];

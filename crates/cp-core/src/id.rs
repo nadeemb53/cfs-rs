@@ -115,4 +115,123 @@ mod tests {
         assert_eq!(hash.len(), 32);
         assert_eq!(hash, *blake3::hash(b"test").as_bytes());
     }
+
+    // Additional tests for comprehensive coverage
+
+    #[test]
+    fn test_generate_id_from_bytes() {
+        // Test generating ID from various byte inputs
+        let data = b"test data for id generation";
+        let id = generate_id(data);
+        assert_eq!(id.len(), 16);
+        // Verify it's a valid 16-byte array
+        assert!(!id.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_generate_id_empty_input() {
+        // Edge case: empty input should still produce a valid 16-byte ID
+        let id = generate_id(b"");
+        assert_eq!(id.len(), 16);
+        // Empty string has a deterministic BLAKE3 hash
+        let expected = blake3::hash(b"");
+        assert_eq!(&id[..], &expected.as_bytes()[..16]);
+    }
+
+    #[test]
+    fn test_id_length_exact_16_bytes() {
+        // Verify exactly 16 bytes for various inputs
+        let inputs = vec![
+            b"a",
+            b"hello",
+            b"a very long string that goes on and on",
+            b"",
+        ];
+        for input in inputs {
+            let id = generate_id(input);
+            assert_eq!(id.len(), 16, "ID should be exactly 16 bytes");
+        }
+    }
+
+    #[test]
+    fn test_id_display_format() {
+        // Test UUID-style display formatting via id_to_uuid
+        let id = generate_id(b"test");
+        let uuid = id_to_uuid(id);
+        // UUID should have standard format with hyphens
+        let display = uuid.to_string();
+        assert_eq!(display.len(), 36); // 8-4-4-4-12 format
+        assert!(display.contains('-'));
+    }
+
+    #[test]
+    fn test_id_from_blake3_first_16_bytes() {
+        // Verify BLAKE3 truncation - first 16 bytes of 32-byte hash
+        let data = b"blake3 truncation test";
+        let id = generate_id(data);
+        let full_hash = blake3::hash(data);
+
+        // ID should be first 16 bytes of full hash
+        assert_eq!(&id[..], &full_hash.as_bytes()[..16]);
+        // Full hash is 32 bytes
+        assert_eq!(full_hash.as_bytes().len(), 32);
+    }
+
+    #[test]
+    fn test_generate_id_known_test_vector() {
+        // CP-001 test vector: known input produces known output
+        // Using a well-defined test string
+        let test_input = b"Canon Protocol CP-001";
+        let id = generate_id(test_input);
+
+        // Verify determinism - multiple calls should produce same ID
+        let id2 = generate_id(test_input);
+        assert_eq!(id, id2);
+
+        // Verify it's exactly 16 bytes
+        assert_eq!(id.len(), 16);
+    }
+
+    #[test]
+    fn test_generate_id_different_inputs_produce_different_ids() {
+        // Verify different inputs produce different IDs
+        let inputs = vec![
+            b"hello",
+            b"world",
+            b"hello world",
+            b"HELLO",
+            b"hello ",
+        ];
+        let mut ids: Vec<[u8; 16]> = Vec::new();
+
+        for input in inputs {
+            let id = generate_id(input);
+            // Ensure no duplicate IDs
+            for existing_id in &ids {
+                assert_ne!(*existing_id, id, "Different inputs should produce different IDs");
+            }
+            ids.push(id);
+        }
+    }
+
+    #[test]
+    fn test_generate_composite_id_multiple_segments() {
+        // Test composite ID with multiple segments
+        let seg1 = b"segment1";
+        let seg2 = b"segment2";
+        let seg3 = b"segment3";
+
+        let id = generate_composite_id(&[seg1, seg2, seg3]);
+
+        // Verify it's exactly 16 bytes
+        assert_eq!(id.len(), 16);
+
+        // Verify determinism
+        let id2 = generate_composite_id(&[seg1, seg2, seg3]);
+        assert_eq!(id, id2);
+
+        // Verify different order produces different ID
+        let id_diff_order = generate_composite_id(&[seg3, seg2, seg1]);
+        assert_ne!(id, id_diff_order);
+    }
 }

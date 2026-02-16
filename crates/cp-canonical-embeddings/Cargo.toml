@@ -2,12 +2,9 @@
 name = "cp-canonical-embeddings"
 version = "0.1.0"
 edition = "2021"
-description = "WASM-based deterministic embedding generation for CP"
+description = "Deterministic embedding generation for CP"
 authors = ["Nadeem Bhati"]
 license = "Apache-2.0"
-
-[build-dependencies]
-serde_json = "1.0"
 
 [dependencies]
 # BLAKE3 for hashing
@@ -20,15 +17,11 @@ thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Unicode normalization for tokenizer
-unicode-normalization = "0.1"
+# Safe tensors for loading model weights
+safetensors = "0.4"
 
-# Safetensors parsing
-safetensors = "0.7"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# WASM-specific
-wasm-bindgen = "0.2"
+# Lazy initialization for model/tokenizer
+lazy_static = "1.4"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]

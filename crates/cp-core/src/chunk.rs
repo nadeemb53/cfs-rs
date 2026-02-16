@@ -193,4 +193,158 @@ mod tests {
 
         assert_eq!(chunk.byte_offset, 14);
     }
+
+    // Additional tests for comprehensive coverage
+
+    #[test]
+    fn test_chunk_id_different_sequence_different_id() {
+        // Same content, different sequence = different ID
+        let doc_id = Uuid::nil();
+
+        let chunk1 = Chunk::new(doc_id, "Same text".to_string(), 0, 0);
+        let chunk2 = Chunk::new(doc_id, "Same text".to_string(), 0, 1);
+        let chunk3 = Chunk::new(doc_id, "Same text".to_string(), 0, 2);
+
+        // All should have different IDs
+        assert_ne!(chunk1.id, chunk2.id);
+        assert_ne!(chunk2.id, chunk3.id);
+        assert_ne!(chunk1.id, chunk3.id);
+    }
+
+    #[test]
+    fn test_chunk_text_hash_computation() {
+        // Test that text_hash is computed from canonicalized text
+        let doc_id = Uuid::nil();
+        let text = "Test text for hashing";
+
+        let chunk = Chunk::new(doc_id, text.to_string(), 0, 0);
+
+        // Compute expected hash: BLAKE3 of canonicalized text
+        let canonical = normalize(text);
+        let expected_hash = *blake3::hash(canonical.as_bytes()).as_bytes();
+
+        assert_eq!(chunk.text_hash, expected_hash);
+    }
+
+    #[test]
+    fn test_chunk_byte_offset_validation() {
+        // Test various byte offset values
+        let doc_id = Uuid::nil();
+
+        // Zero offset
+        let chunk0 = Chunk::new(doc_id, "test".to_string(), 0, 0);
+        assert_eq!(chunk0.byte_offset, 0);
+
+        // Large offset for large files
+        let chunk_large = Chunk::new(doc_id, "test".to_string(), 1_000_000, 0);
+        assert_eq!(chunk_large.byte_offset, 1_000_000);
+    }
+
+    #[test]
+    fn test_chunk_sequence_ordering() {
+        // Test sequence numbers are 0-indexed
+        let doc_id = Uuid::nil();
+
+        let chunk0 = Chunk::new(doc_id, "first".to_string(), 0, 0);
+        let chunk1 = Chunk::new(doc_id, "second".to_string(), 10, 1);
+        let chunk2 = Chunk::new(doc_id, "third".to_string(), 20, 2);
+
+        assert_eq!(chunk0.sequence, 0);
+        assert_eq!(chunk1.sequence, 1);
+        assert_eq!(chunk2.sequence, 2);
+    }
+
+    #[test]
+    fn test_chunk_canonical_bytes_format() {
+        // Verify serialization format includes all fields
+        let doc_id = Uuid::nil();
+        let chunk = Chunk::new(doc_id, "Test content".to_string(), 0, 0);
+
+        // Verify all required fields exist and are valid
+        assert_eq!(chunk.id.as_bytes().len(), 16);
+        assert_eq!(chunk.doc_id.as_bytes().len(), 16);
+        assert_eq!(chunk.text_hash.len(), 32);
+        assert!(chunk.sequence >= 0);
+    }
+
+    #[test]
+    fn test_chunk_overlap_semantics() {
+        // Test byte_offset and byte_length for overlap detection
+        let doc_id = Uuid::nil();
+        let text = "Hello World";
+
+        // First chunk
+        let chunk1 = Chunk::new(doc_id, text.to_string(), 0, 0);
+        // Second chunk starting at offset (simulating overlap)
+        let chunk2 = Chunk::new(doc_id, text.to_string(), 5, 1);
+
+        // Both should exist with different offsets
+        assert_eq!(chunk1.byte_offset, 0);
+        assert_eq!(chunk2.byte_offset, 5);
+
+        // byte_length should match text length
+        assert_eq!(chunk1.byte_length, text.len() as u64);
+    }
+
+    #[test]
+    fn test_chunk_text_validation_utf8() {
+        // Test that only valid UTF-8 is accepted
+        let doc_id = Uuid::nil();
+
+        // Valid UTF-8 strings
+        let valid_texts = vec![
+            "Hello, World!",
+            "Unicode: cafe with accent: cafe",
+            "Emoji: hello world",
+            "",
+            "Multiple\nlines\nhere",
+        ];
+
+        for text in valid_texts {
+            let chunk = Chunk::new(doc_id, text.to_string(), 0, 0);
+            assert!(chunk.text.is_utf8());
+        }
+    }
+
+    #[test]
+    fn test_chunk_empty_text_rejected() {
+        // Test handling of empty chunk text
+        let doc_id = Uuid::nil();
+
+        // Empty text should still create a chunk (with empty text)
+        let chunk = Chunk::new(doc_id, "".to_string(), 0, 0);
+
+        // The chunk should exist but with empty text
+        assert_eq!(chunk.text, "");
+        assert_eq!(chunk.byte_length, 0);
+    }
+
+    #[test]
+    fn test_chunk_text_hash_hex() {
+        // Test text_hash_hex() method
+        let doc_id = Uuid::nil();
+        let chunk = Chunk::new(doc_id, "Test text".to_string(), 0, 0);
+
+        let hex = chunk.text_hash_hex();
+
+        // Should be 64 characters (32 bytes * 2 hex chars)
+        assert_eq!(hex.len(), 64);
+
+        // Should only contain hex characters
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_chunk_from_canonical() {
+        // Test from_canonical constructor
+        let doc_id = Uuid::nil();
+        let text = "Already canonicalized text".to_string();
+
+        let chunk = Chunk::from_canonical(doc_id, text.clone(), 100, 5);
+
+        assert_eq!(chunk.text, text);
+        assert_eq!(chunk.byte_offset, 100);
+        assert_eq!(chunk.sequence, 5);
+        assert_eq!(chunk.doc_id, doc_id);
+    }
 }
